@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400">
+  <defs>
+    <style>
+      @keyframes pulse {
+        0%   { opacity: 0.6; }
+        100% { opacity: 1.0; }
+      }
+      @keyframes slideIn {
+        0%   { transform: translateX(-40px); opacity: 0; }
+        100% { transform: translateX(0);     opacity: 1; }
+      }
+      @keyframes glow {
+        0%   { transform: scale(1);    }
+        50%  { transform: scale(1.06); }
+        100% { transform: scale(1);    }
+      }
+      @keyframes flowDot {
+        0%   { cx: 60;   opacity: 0; }
+        5%   { opacity: 1; }
+        95%  { opacity: 1; }
+        100% { cx: 1140; opacity: 0; }
+      }
+      .bento-card  { animation: pulse 2s infinite alternate ease-in-out; }
+      .title-text  { animation: slideIn 0.8s ease-out forwards; }
+      .metric-pill { animation: glow 3s infinite ease-in-out; }
+      .dot1 { animation: flowDot 4s linear infinite; }
+      .dot2 { animation: flowDot 4s linear 1.33s infinite; }
+      .dot3 { animation: flowDot 4s linear 2.66s infinite; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="400" fill="#0E1013"/>
+
+  <!-- Bento grid cards — 3×2 layout -->
+  <!-- Row 1 -->
+  <rect class="bento-card" x="20"  y="20" width="360" height="140" rx="12" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <rect class="bento-card" x="420" y="20" width="360" height="140" rx="12" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <rect class="bento-card" x="820" y="20" width="360" height="140" rx="12" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <!-- Row 2 -->
+  <rect class="bento-card" x="20"  y="200" width="360" height="120" rx="12" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <rect class="bento-card" x="420" y="200" width="360" height="120" rx="12" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <rect class="bento-card" x="820" y="200" width="360" height="120" rx="12" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+
+  <!-- Main centered title -->
+  <text class="title-text" x="600" y="90" text-anchor="middle"
+        fill="#FFFFFF" font-size="48" font-weight="bold" font-family="monospace">
+    AI TO AGENTS SESSION LAB
+  </text>
+
+  <!-- Yellow subtitle -->
+  <text x="600" y="120" text-anchor="middle"
+        fill="#FACC15" font-size="15" font-family="monospace">
+    From LLM Internals &amp; Local CPU Ollama to Autonomous Agentic Task Scheduling
+  </text>
+
+  <!-- Author badge pill -->
+  <rect x="310" y="142" width="580" height="30" rx="15" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <text x="600" y="162" text-anchor="middle"
+        fill="#FFFFFF" font-size="12" font-family="monospace">
+    Senuk Manditha Dias · Microsoft Gold Student Ambassador
+  </text>
+
+  <!-- Metric pills row (bottom area of bento cards, row 2) -->
+  <!-- Pill 1: 6 Labs -->
+  <g class="metric-pill" transform-origin="90 258">
+    <rect x="30"  y="218" width="130" height="44" rx="22" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+    <text x="95"  y="238" text-anchor="middle" fill="#FACC15" font-size="18" font-weight="bold" font-family="monospace">6 Labs</text>
+    <text x="95"  y="253" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">Hands-On</text>
+  </g>
+  <!-- Pill 2: CPU-Only -->
+  <g class="metric-pill" transform-origin="230 258">
+    <rect x="175" y="218" width="150" height="44" rx="22" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+    <text x="250" y="238" text-anchor="middle" fill="#FACC15" font-size="14" font-weight="bold" font-family="monospace">CPU-Only</text>
+    <text x="250" y="253" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">No GPU Needed</text>
+  </g>
+  <!-- Pill 3: qwen2.5:1.5b (in second bento card row 2) -->
+  <g class="metric-pill" transform-origin="600 258">
+    <rect x="435" y="218" width="180" height="44" rx="22" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+    <text x="525" y="238" text-anchor="middle" fill="#FACC15" font-size="14" font-weight="bold" font-family="monospace">qwen2.5:1.5b</text>
+    <text x="525" y="253" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">Primary Model</text>
+  </g>
+  <!-- Pill 4: ReAct Agents (in third bento card row 2) -->
+  <g class="metric-pill" transform-origin="940 258">
+    <rect x="840" y="218" width="170" height="44" rx="22" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+    <text x="925" y="238" text-anchor="middle" fill="#FACC15" font-size="14" font-weight="bold" font-family="monospace">ReAct Agents</text>
+    <text x="925" y="253" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">Autonomous Loops</text>
+  </g>
+
+  <!-- Decorative icon hints in bento cards row 1 -->
+  <text x="200"  y="80" text-anchor="middle" fill="#FACC15" font-size="28" font-family="monospace" opacity="0.3">⚙</text>
+  <text x="600"  y="52" text-anchor="middle" fill="#FACC15" font-size="22" font-family="monospace" opacity="0.2">▶</text>
+  <text x="1000" y="80" text-anchor="middle" fill="#FACC15" font-size="28" font-family="monospace" opacity="0.3">🤖</text>
+
+  <!-- Animated data flow dots across bottom -->
+  <circle class="dot1" cy="378" r="5" fill="#FACC15" cx="60"/>
+  <circle class="dot2" cy="385" r="5" fill="#FACC15" cx="60" opacity="0"/>
+  <circle class="dot3" cy="378" r="5" fill="#FACC15" cx="60" opacity="0"/>
+
+  <!-- Bottom label strip -->
+  <rect x="0" y="360" width="1200" height="40" fill="#0E1013"/>
+  <text x="600" y="387" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">
+    AI to Agents Session Lab · github.com/SenukDias · ZenAegis (Pvt) Ltd
+  </text>
+</svg>

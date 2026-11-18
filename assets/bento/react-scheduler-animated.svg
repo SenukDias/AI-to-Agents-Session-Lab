@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520">
+  <defs>
+    <style>
+      @keyframes travel {
+        0%   { stroke-dashoffset: 300; }
+        100% { stroke-dashoffset: 0;   }
+      }
+      @keyframes blink {
+        0%   { opacity: 0.3; }
+        100% { opacity: 1.0; }
+      }
+      @keyframes dotMove1 {
+        0%   { transform: translateX(0px);   opacity: 0; }
+        5%   { opacity: 1; }
+        95%  { opacity: 1; }
+        100% { transform: translateX(130px); opacity: 0; }
+      }
+      @keyframes dotMove2 {
+        0%   { transform: translateX(0px);   opacity: 0; }
+        5%   { opacity: 1; }
+        95%  { opacity: 1; }
+        100% { transform: translateX(130px); opacity: 0; }
+      }
+      .arrow-animated { stroke-dasharray: 8,4; animation: travel 1.5s linear infinite; }
+      .hitl-dot       { animation: blink 1s infinite alternate ease-in-out; }
+      .dot-top1       { animation: dotMove1 2s linear 0s   infinite; }
+      .dot-top2       { animation: dotMove1 2s linear 0.6s infinite; }
+      .dot-top3       { animation: dotMove1 2s linear 1.2s infinite; }
+      .dot-bot1       { animation: dotMove2 2s linear 0s   infinite; }
+      .dot-bot2       { animation: dotMove2 2s linear 0.6s infinite; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="520" fill="#0E1013"/>
+
+  <!-- Title -->
+  <text x="600" y="30" text-anchor="middle" fill="#FACC15" font-size="14" font-weight="bold" font-family="monospace">
+    ReAct SCHEDULER · AGENTIC LOOP DIAGRAM
+  </text>
+
+  <!-- ═══════════════ ROW 1 (y=60..190) ═══════════════ -->
+
+  <!-- Node 1: Cron/Event Trigger -->
+  <rect x="20"  y="60" width="220" height="100" rx="8" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <text x="130" y="103" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Cron/Event</text>
+  <text x="130" y="121" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Trigger</text>
+  <text x="130" y="145" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">⏰ Scheduled / On-event</text>
+
+  <!-- Arrow →  Cron → Orchestrator -->
+  <line x1="240" y1="110" x2="280" y2="110" stroke="#FACC15" stroke-width="2" class="arrow-animated"/>
+  <circle class="dot-top1" cx="245" cy="110" r="5" fill="#FACC15" opacity="0"/>
+  <circle class="dot-top2" cx="245" cy="110" r="5" fill="#FACC15" opacity="0"/>
+  <polygon points="280,105 292,110 280,115" fill="#FACC15"/>
+
+  <!-- Node 2: Orchestrator Agent -->
+  <rect x="295" y="60" width="220" height="100" rx="8" fill="#181A1F" stroke="#FACC15" stroke-width="2"/>
+  <text x="405" y="103" text-anchor="middle" fill="#FACC15" font-size="13" font-weight="bold" font-family="monospace">Orchestrator</text>
+  <text x="405" y="121" text-anchor="middle" fill="#FACC15" font-size="13" font-weight="bold" font-family="monospace">Agent</text>
+  <text x="405" y="145" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">🧠 Plans &amp; Dispatches</text>
+
+  <!-- Arrow → Orchestrator → MCP Tool -->
+  <line x1="515" y1="110" x2="555" y2="110" stroke="#FACC15" stroke-width="2" class="arrow-animated"/>
+  <circle class="dot-top1" cx="520" cy="110" r="5" fill="#FACC15" opacity="0"/>
+  <polygon points="555,105 567,110 555,115" fill="#FACC15"/>
+
+  <!-- Node 3: MCP Tool Server -->
+  <rect x="570" y="60" width="220" height="100" rx="8" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <text x="680" y="103" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">MCP Tool</text>
+  <text x="680" y="121" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Server</text>
+  <text x="680" y="145" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">🔧 External APIs/Tools</text>
+
+  <!-- Arrow → MCP → HITL -->
+  <line x1="790" y1="110" x2="830" y2="110" stroke="#FACC15" stroke-width="2" class="arrow-animated"/>
+  <circle class="dot-top1" cx="795" cy="110" r="5" fill="#FACC15" opacity="0"/>
+  <polygon points="830,105 842,110 830,115" fill="#FACC15"/>
+
+  <!-- Node 4: Human-in-the-Loop -->
+  <rect x="845" y="60" width="260" height="100" rx="8" fill="#181A1F" stroke="#EF4444" stroke-width="2"/>
+  <text x="975" y="95" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Human-in-the-Loop</text>
+  <!-- HITL GATE label -->
+  <rect x="880" y="108" width="100" height="22" rx="11" fill="#EF4444" opacity="0.2"/>
+  <text x="930" y="123" text-anchor="middle" fill="#EF4444" font-size="11" font-weight="bold" font-family="monospace">HITL GATE</text>
+  <!-- Red warning indicator -->
+  <circle class="hitl-dot" cx="1080" cy="85" r="8" fill="#EF4444"/>
+  <text x="975" y="148" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">✋ Approval Required</text>
+
+  <!-- ═══════════════ ROW 2 (y=270..380) ═══════════════ -->
+
+  <!-- Node 5: Thought -->
+  <rect x="295" y="280" width="180" height="100" rx="8" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <text x="385" y="323" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Thought</text>
+  <text x="385" y="343" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">💭 Reasoning step</text>
+
+  <!-- Arrow → Thought → Action -->
+  <line x1="475" y1="330" x2="515" y2="330" stroke="#FACC15" stroke-width="2" class="arrow-animated"/>
+  <circle class="dot-bot1" cx="480" cy="330" r="5" fill="#FACC15" opacity="0"/>
+  <polygon points="515,325 527,330 515,335" fill="#FACC15"/>
+
+  <!-- Node 6: Action -->
+  <rect x="530" y="280" width="180" height="100" rx="8" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <text x="620" y="323" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Action</text>
+  <text x="620" y="343" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">⚡ Tool call / output</text>
+
+  <!-- Arrow → Action → Observation -->
+  <line x1="710" y1="330" x2="750" y2="330" stroke="#FACC15" stroke-width="2" class="arrow-animated"/>
+  <circle class="dot-bot1" cx="715" cy="330" r="5" fill="#FACC15" opacity="0"/>
+  <polygon points="750,325 762,330 750,335" fill="#FACC15"/>
+
+  <!-- Node 7: Observation -->
+  <rect x="765" y="280" width="200" height="100" rx="8" fill="#181A1F" stroke="#FACC15" stroke-width="1.5"/>
+  <text x="865" y="323" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="bold" font-family="monospace">Observation</text>
+  <text x="865" y="343" text-anchor="middle" fill="#9CA3AF" font-size="11" font-family="monospace">👁 Result / Feedback</text>
+
+  <!-- ═══════════════ VERTICAL CONNECTIONS ═══════════════ -->
+
+  <!-- Orchestrator ↓ to Thought -->
+  <line x1="405" y1="160" x2="405" y2="280" stroke="#FACC15" stroke-width="1.5" stroke-dasharray="6,4" class="arrow-animated"/>
+  <polygon points="400,278 405,290 410,278" fill="#FACC15"/>
+
+  <!-- ═══════════════ LOOP-BACK ARROW ═══════════════ -->
+  <!-- Observation → bottom → back up to Orchestrator Agent -->
+  <path d="M 865 380 Q 865 460 600 460 Q 335 460 335 380" fill="none" stroke="#FACC15" stroke-width="2" stroke-dasharray="8,4" class="arrow-animated"/>
+  <!-- Arrow head back up at Orchestrator bottom -->
+  <polygon points="330,383 335,370 340,383" fill="#FACC15"/>
+
+  <!-- Loop label -->
+  <text x="600" y="478" text-anchor="middle" fill="#FACC15" font-size="11" font-family="monospace">↩ Loop back: Observation → Orchestrator (next iteration)</text>
+
+  <!-- Footer -->
+  <text x="600" y="510" text-anchor="middle" fill="#9CA3AF" font-size="10" font-family="monospace">
+    AI to Agents Session Lab · Senuk Manditha Dias · ReAct Pattern: Thought → Action → Observation
+  </text>
+</svg>
