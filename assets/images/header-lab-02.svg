@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 220" width="1200" height="220">
+  <defs>
+    <linearGradient id="h02Bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E1013" />
+      <stop offset="100%" stop-color="#181A1F" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="220" fill="url(#h02Bg)" />
+  <rect x="20" y="20" width="1160" height="180" rx="12" fill="none" stroke="#262930" stroke-width="1.5" />
+  <rect x="20" y="20" width="1160" height="180" rx="12" fill="none" stroke="#FACC15" stroke-width="1.5" stroke-dasharray="120 700" />
+  
+  <rect x="50" y="44" width="100" height="26" rx="4" fill="#181A1F" stroke="#FACC15" stroke-width="1" />
+  <text x="100" y="61" text-anchor="middle" fill="#FACC15" font-family="ui-monospace, Consolas, monospace" font-size="12" font-weight="700">LAB 02</text>
+  
+  <text x="50" y="112" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="800">Prompt-to-Answer Pipeline &amp; KV Cache</text>
+  <text x="50" y="146" fill="#9CA3AF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15">Phase 1 Prefill (TTFT) • Phase 2 Decode (Bandwidth-Bound) • KV Cache Speedup • Sampling Knobs</text>
+
+  <g transform="translate(1000, 70)">
+    <circle cx="50" cy="40" r="32" fill="#181A1F" stroke="#262930" stroke-width="1.5" />
+    <text x="50" y="46" text-anchor="middle" fill="#FACC15" font-family="system-ui, sans-serif" font-size="24">⚡</text>
+  </g>
+</svg>

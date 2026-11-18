@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" width="1200" height="240">
+  <defs>
+    <linearGradient id="fbBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14171D" />
+      <stop offset="100%" stop-color="#0E1013" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="240" fill="url(#fbBg)" />
+  <rect x="16" y="16" width="1168" height="208" rx="14" fill="#181A1F" stroke="#FACC15" stroke-width="1.5" />
+  
+  <rect x="50" y="40" width="180" height="26" rx="4" fill="#0E1013" stroke="#FACC15" stroke-width="1" />
+  <text x="140" y="57" text-anchor="middle" fill="#FACC15" font-family="ui-monospace, monospace" font-size="11" font-weight="700">ZENAEGIS CYBERSECURITY</text>
+
+  <text x="50" y="105" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="800">TunnelFlare &amp; Autonomous AI Security Operations</text>
+  <text x="50" y="138" fill="#9CA3AF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14">Explore production DevSecOps tunneling and autonomous local AI agents engineered for resilience.</text>
+  
+  <g transform="translate(50, 165)">
+    <rect width="160" height="34" rx="6" fill="#FACC15" />
+    <text x="80" y="22" text-anchor="middle" fill="#0E1013" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">Explore on GitHub →</text>
+  </g>
+
+  <g transform="translate(1000, 70)">
+    <circle cx="60" cy="50" r="44" fill="#0E1013" stroke="#FACC15" stroke-width="2" />
+    <text x="60" y="60" text-anchor="middle" fill="#FACC15" font-family="system-ui, sans-serif" font-size="34">🛡️</text>
+  </g>
+</svg>

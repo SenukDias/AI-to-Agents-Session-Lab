@@ -1,337 +1,244 @@
-<p align="center">
-  <img src="../assets/bento/hero-banner.svg" alt="AI to Agents Session Lab" width="100%"/>
-</p>
-
-![Lab 05](https://img.shields.io/badge/Lab%2005-Agentic%20Task%20Scheduling-FACC15?style=for-the-badge&labelColor=0E1013&logoColor=FACC15)
-![Time](https://img.shields.io/badge/Time-60%20min-white?style=for-the-badge&labelColor=0E1013)
-![Difficulty](https://img.shields.io/badge/Difficulty-Intermediate-FACC15?style=for-the-badge&labelColor=0E1013)
-![CPU Only](https://img.shields.io/badge/CPU%20Only-No%20GPU%20Required-FACC15?style=for-the-badge&labelColor=0E1013)
-
-[⬅️ Previous Lab: ReAct Agent From Scratch](lab-04-react-agent-from-scratch.md) | [🏠 Home: README](../README.md)
-
+---
+layout: default
+title: "Lab 05: Autonomous Scheduled Agent & HITL Gate"
 ---
 
-# Lab 05: Real-World Agentic Task Scheduling, Orchestrator-Workers & MCP Architecture
+![Lab 05: Autonomous Scheduled Agent & HITL Gate](../assets/images/header-lab-05.svg)
 
-Welcome to the capstone lab of the **AI to Agents Session Lab**. In [Lab 04](lab-04-react-agent-from-scratch.md), you transitioned from a passive, text-in/text-out LLM to an active **ReAct Agent** executing local Python tools inside an autonomous evaluation loop.
+> **Build an autonomous production agent that runs on a schedule, persists state across restarts, retries with exponential backoff, and pauses at a Human-in-the-Loop approval gate.**
 
-However, in real-world production environments (such as SOC automation, autonomous infrastructure maintenance, or scheduled DevSecOps auditing), human operators do not sit at a terminal manually pressing Enter to trigger tasks. Real-world agents must operate autonomously on a schedule, ingest asynchronous external triggers, maintain resilient persistent state across process reboots, coordinate sub-agents, and safely pause at a **Human-in-the-Loop (HITL)** approval gate before executing dangerous actions.
+Welcome to the capstone lab of the **AI to Agents Session Lab**! In Lab 04, you built a ReAct agent that interacted with a user at the terminal. But in real-world production systems (such as SOC automation, infrastructure maintenance, or scheduled DevSecOps auditing), agents must run autonomously on a schedule, maintain resilient persistent state across process reboots, and safely pause before executing high-impact destructive operations. In this lab, you'll build an autonomous scheduled agent with state checkpointing and a Human-in-the-Loop (HITL) safety gate.
 
-In this lab, you will explore the architectural patterns powering autonomous agent execution and build a production-grade scheduled autonomous agent with persistent JSON checkpointing and safety guardrails.
-
----
+> ⚠️ **Prerequisites**: Make sure you've completed **[Lab 04: ReAct Agent Loop From Scratch](lab-04-react-agent-from-scratch.md)**. Ensure `schedule` is installed (`pip install -r requirements.txt`).
 
 ## 🎯 Learning Objectives
 
-By the end of this lab, you will be able to:
-1. **Differentiate the Three Agent Scheduling Paradigms**: Time-Driven (Cron/Interval), Event-Driven (Webhooks/Alerts), and State-Graph / Queue-Driven pipelines.
-2. **Understand Orchestrator-Worker & Multi-Agent Decomposition**: How complex multi-step objectives are decomposed into specialized sub-tasks assigned to worker agents.
-3. **Master the Model Context Protocol (MCP)**: Understand Anthropic's open standard for connecting LLM agents to external data sources, tools, and environments.
-4. **Implement State Checkpointing (`agent_state.json`)**: Ensure agent memory, audit counters, and findings survive crashes and system restarts.
-5. **Implement Retry Logic with Exponential Backoff**: Handle transient Ollama inference timeouts and connection drops gracefully (`2^n` second delays).
-6. **Deploy Human-in-the-Loop (HITL) Safety Gates**: Intercept high-risk destructive actions (e.g., firewall rule modification, log purge) with an interactive approval checkpoint.
+By the end of this lab, you'll be able to:
+
+- Differentiate the three agent scheduling paradigms: Time-Driven (Cron), Event-Driven (Webhooks), and Queue-Driven
+- Understand Orchestrator-Worker decomposition and the Model Context Protocol (MCP) standard
+- Implement atomic persistent state checkpointing (`agent_state.json`) that survives system restarts
+- Implement exponential backoff retry logic (`2^n` seconds) for resilient local inference
+- Engineer an interactive Human-in-the-Loop (HITL) gate for dangerous or destructive operations
+
+> ⏱️ **Estimated Time**: ~60 minutes (20 min reading + 40 min hands-on)
 
 ---
 
-## 📚 Theory: From Interactive Chat to Autonomous Scheduled Agents
+# Real-World Analogy: The Night Watchman with Emergency Powers
 
-### 1. The Autonomous Agent Lifecycle
+Think of an autonomous production agent like a security night watchman patrolling an office complex:
 
-An autonomous agent differs from a conversational chatbot through its continuous execution lifecycle:
+- **The Schedule (Cron)**: Every hour on the hour, the watchman starts a new patrol route.
+- **The Patrol Log (`agent_state.json`)**: The watchman carries a clipboard. They record which doors were inspected, how many runs have been completed, and past anomalies. If a new watchman takes over tomorrow, the clipboard tells them the full history.
+- **Routine Actions (Auto-Approved)**: Checking door locks, verifying temperatures, and inspecting badges are low-risk routine tasks executed automatically.
+- **The Emergency Gate (Human-in-the-Loop)**: If the watchman discovers a gas leak and decides to cut power to the entire data center, they **do not act alone**. They pick up the phone and call the building engineer for verbal authorization!
 
 <p align="center">
-  <img src="../assets/diagrams/10-autonomous-agent-loop.png" alt="Autonomous Agent Loop" width="85%"/>
+  <img src="../assets/diagrams/10-autonomous-agent-loop.png" alt="Autonomous Agent Lifecycle" width="85%"/>
 </p>
-
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │                 Autonomous Agent Lifecycle                  │
-  │                                                             │
-  │   1. Trigger (Time / Webhook / Queue)                       │
-  │         │                                                   │
-  │         ▼                                                   │
-  │   2. Load State Checkpoint (agent_state.json)               │
-  │         │                                                   │
-  │         ▼                                                   │
-  │   3. Perception & Environment Sampling (Gather Context)     │
-  │         │                                                   │
-  │         ▼                                                   │
-  │   4. ReAct Reasoning Loop (LLM Thought -> Tool Action)      │
-  │         │                                                   │
-  │         ├────► High-Risk Action? ──► [HITL Approval Gate]   │
-  │         │                                                   │
-  │         ▼                                                   │
-  │   5. Observation Ingestion & Task Verification              │
-  │         │                                                   │
-  │         ▼                                                   │
-  │   6. State Checkpoint Persistence (Write to disk)           │
-  │         │                                                   │
-  │         ▼                                                   │
-  │   7. Sleep / Wait for Next Trigger Event                    │
-  └─────────────────────────────────────────────────────────────┘
-```
 
 ---
 
-### 2. The Three Agent Scheduling Paradigms
+## The Three Agent Scheduling Paradigms
 
-Production agents are activated by three fundamental trigger architectures:
+Production agents are activated by three fundamental architectures:
 
 | Scheduling Paradigm | Trigger Mechanism | Real-World Use Case | Characteristics |
 |---|---|---|---|
-| **Time-Driven (Cron / Interval)** | Clock intervals (e.g. `every 5 minutes`, `0 2 * * *`) | Nightly compliance audits, hourly resource cleanup, log triage | Predictable cadence, idempotent executions, batch evaluation |
-| **Event-Driven (Webhooks / Reactive)** | HTTP webhook, pub/sub topic, message queue | Inbound SIEM alert, GitHub push webhook, customer ticket creation | Instant latency, variable load, burst capacity requirement |
-| **State-Graph / Queue-Driven** | Directed Acyclic Graph (DAG) transitions, LangGraph | Multi-step bug triage, code refactoring across 50 repositories | Node-to-node state passing, conditional branching, rollback logic |
-
-In this lab, we build a **Time-Driven Scheduled Agent** utilizing Python's lightweight `schedule` engine running against our local `qwen2.5:1.5b` model.
+| **Time-Driven (Cron / Interval)** | Clock intervals (e.g. `every 5 minutes`) | Nightly compliance audits, hourly resource cleanup | Predictable cadence, idempotent executions |
+| **Event-Driven (Webhooks / Alerts)** | HTTP webhook, pub/sub topic | SIEM incident alerts, GitHub PR pushes | Instant latency, burst capacity requirement |
+| **State-Graph / Queue-Driven** | Directed Acyclic Graph (DAG), LangGraph | Multi-step bug triage across 50 repositories | Node-to-node state passing, rollback logic |
 
 ---
 
-### 3. Orchestrator-Worker Decomposition
+## Orchestrator-Worker Decomposition & MCP
 
-As task complexity grows, asking a single small 1.5B or 3B model to handle planning, web browsing, data parsing, risk scoring, and report generation in one context window leads to hallucination and context overflow.
-
-The **Orchestrator-Worker Pattern** solves this by separating high-level strategic decomposition from tactical execution:
+As task scope expands, asking a small 1.5B model to handle planning, log triage, risk calculation, and remediation in one prompt leads to hallucinations. The **Orchestrator-Worker Pattern** solves this:
 
 <p align="center">
   <img src="../assets/diagrams/11-orchestrator-worker-agents.png" alt="Orchestrator Worker Pattern" width="90%"/>
 </p>
 
-1. **The Orchestrator Agent**: Receives the top-level user objective (e.g., *"Perform full security audit on host 10.0.0.15"*). It breaks this down into sub-tasks and delegates them to specialized workers.
-2. **Worker Agents**: Focused sub-agents with dedicated, constrained system prompts and minimal toolsets (e.g., `LogAuditorWorker`, `VulnerabilityScannerWorker`, `RemediationAdvisorWorker`).
-3. **Synthesis**: The Orchestrator aggregates worker findings into a single coherent output.
-
 <p align="center">
   <img src="../assets/diagrams/12-multi-agent-decomposition.png" alt="Multi-Agent Decomposition" width="85%"/>
 </p>
 
----
-
-### 4. The Model Context Protocol (MCP)
-
-In Lab 04, we hardcoded local Python functions into a `TOOLS` dictionary. While effective for simple scripts, this approach does not scale across enterprise environments where agents must interface with databases, GitHub repositories, Slack workspaces, and cloud APIs.
-
-**Model Context Protocol (MCP)**, introduced by Anthropic as an open standard, creates a universal abstraction layer between AI models and tools:
+To connect agents to enterprise tools, Anthropic introduced the **Model Context Protocol (MCP)**:
 
 <p align="center">
   <img src="../assets/diagrams/13-mcp-architecture.png" alt="Model Context Protocol Architecture" width="90%"/>
 </p>
 
-- **MCP Host**: The application environment executing the agent (e.g., Claude Desktop, IDE, or custom Python runner).
-- **MCP Client**: The client library managing protocol negotiation and message routing.
-- **MCP Server**: A lightweight process exposing tools, resource endpoints, and prompt templates over standard input/output (`stdio`) or Server-Sent Events (`SSE`).
-- **Standardized Schema**: Tools expose their JSON schemas using standard schemas, allowing any model (local Ollama or cloud) to invoke any MCP server seamlessly.
+- **MCP Client**: Handles message routing and protocol negotiation.
+- **MCP Server**: Lightweight process exposing standardized tools over `stdio` or `SSE`.
+- **Universal Interoperability**: Any model (local Ollama or cloud) can query any MCP tool server without custom wrapper code.
 
 ---
 
-### 5. Architectural Animation: Scheduled ReAct Pipeline with HITL Gate
+## The Complete Scheduled ReAct Pipeline with HITL Gate
 
-Here is how our complete scheduled autonomous pipeline functions:
+Here is how our complete scheduled autonomous pipeline operates:
 
 <p align="center">
-  <img src="../assets/bento/react-scheduler-animated.svg" alt="ReAct Scheduler Animated" width="100%"/>
+  <img src="../assets/bento/react-scheduler-animated.svg" alt="ReAct Scheduler Animated Pipeline" width="100%"/>
 </p>
 
-Notice the **Human-in-the-Loop (HITL) Gate**: When an agent decides to delete files, shut down a service, or block an IP, the execution **pauses** and demands human authorization before dispatching the command.
+Notice the **Human-in-the-Loop (HITL) Gate**: When an agent proposes a high-risk action (like deleting logs or modifying firewall rules), execution pauses and prompts an operator for interactive confirmation before running the command.
 
 ---
 
-## 🔬 Hands-On Step-by-Step
+## See It In Action
 
-### Step 1: Examine the Exercise Starter File
+### Demo 1: Atomic State Checkpointing
 
-Open `exercises/ex05_scheduled_autonomous_agent.py` in your editor. Notice the structure:
-- `STATE_FILE = Path("agent_state.json")`: Path to the local state file.
-- `load_state()`: Reads existing state or returns default dictionary with `run_count: 0`.
-- `save_state()`: Atomic JSON writing to ensure data integrity.
-- `query_ollama_with_retry()`: Backoff logic for Ollama connection resilience.
-- `hitl_gate()`: The interactive authorization checkpoint.
-- `run_audit_job()`: The scheduled periodic payload.
-
-### Step 2: Implement the State Persistence Engine
-
-In an autonomous agent, if the host machine restarts, the agent must not forget past findings or reset its audit count.
-
-Implement `load_state()` and `save_state()`:
-```python
-def load_state() -> dict:
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {
-        "last_run": None,
-        "run_count": 0,
-        "findings": [],
-        "action_log": [],
-        "high_risk_pending": []
-    }
-
-def save_state(state: dict) -> None:
-    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
-```
-
-### Step 3: Implement Exponential Backoff Retry Logic
-
-When running on CPU laptops under heavy background load, Ollama may occasionally take longer than usual to respond or return a transient connection error. Exponential backoff prevents agent crashes:
+State must be saved atomically so sudden power loss or process termination never corrupts `agent_state.json`:
 
 ```python
-def query_ollama_with_retry(prompt: str, retries: int = MAX_RETRIES) -> str:
-    url = f"{OLLAMA_HOST}/api/generate"
-    payload = {"model": MODEL, "prompt": prompt, "stream": False}
-    
-    for attempt in range(retries):
-        try:
-            resp = requests.post(url, json=payload, timeout=60)
-            resp.raise_for_status()
-            return resp.json().get("response", "").strip()
-        except Exception as e:
-            wait_time = 2 ** attempt  # 1s, 2s, 4s
-            if attempt == retries - 1:
-                raise RuntimeError(f"Ollama request failed after {retries} attempts: {e}")
-            time.sleep(wait_time)
+import json
+from pathlib import Path
+
+STATE_FILE = Path("agent_state.json")
+
+def save_state_atomic(state: dict) -> None:
+    temp_file = STATE_FILE.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temp_file.replace(STATE_FILE)  # Atomic rename on NTFS and POSIX
 ```
 
-### Step 4: Implement the Human-in-the-Loop (HITL) Gate
+---
 
-When the agent identifies an action with `risk_level == "high"` or `"critical"`, it must never execute automatically without operator approval:
+### Demo 2: The HITL Approval Gate in Action
+
+When a high-risk action is detected, the safety gate takes over:
 
 ```python
 def hitl_gate(action_description: str, risk_level: str) -> bool:
     if risk_level.lower() in ("high", "critical"):
-        console.print(f"\n[bold red]⚠️  HUMAN-IN-THE-LOOP APPROVAL REQUIRED[/bold red]")
-        console.print(f"[yellow]Risk Level:[/yellow] [bold red]{risk_level.upper()}[/bold red]")
-        console.print(f"[yellow]Proposed Action:[/yellow] {action_description}")
+        print("\n⚠️  HUMAN-IN-THE-LOOP APPROVAL REQUIRED")
+        print(f"Risk Rating:     {risk_level.upper()}")
+        print(f"Proposed Action: {action_description}")
         
-        try:
-            choice = input("\nAuthorize this action? [y/N]: ").strip().lower()
-            return choice in ("y", "yes")
-        except EOFError:
-            return False
+        choice = input("Authorize execution? [y/N]: ").strip().lower()
+        return choice in ("y", "yes")
     return True
 ```
 
-### Step 5: Test Your Starter Implementation
+<details>
+<summary>🎬 See it in action!</summary>
 
-Run your starter script:
+```text
+AUDIT CYCLE #1 | 2026-11-18 16:40:00
+[*] Dispatching log evaluation to local LLM with exponential backoff...
+┌──────────────────┬────────────────────────────────────────────────────────┐
+│ Property         │ Value                                                  │
+├──────────────────┼────────────────────────────────────────────────────────┤
+│ Run Count        │ 1                                                      │
+│ Evaluated Events │ 4 log lines                                            │
+│ LLM Summary      │ SSH brute force detected from 203.0.113.88. High risk. │
+└──────────────────┴────────────────────────────────────────────────────────┘
+
+⚠️  HUMAN-IN-THE-LOOP APPROVAL REQUIRED
+Risk Rating:     HIGH
+Proposed Action: Apply iptables firewall drop rule for IP 203.0.113.88.
+Authorize execution? [y/N]: y
+✓ Action approved by operator.
+✓ State checkpoint saved to agent_state.json
+```
+</details>
+
+**The takeaway**: The agent performs automated auditing autonomously, but safely yields control to a human operator before taking irreversible or destructive action.
+
+---
+
+## 📝 Assignment
+
+### Main Challenge: Complete `exercises/ex05_scheduled_autonomous_agent.py`
+
+Open `exercises/ex05_scheduled_autonomous_agent.py` and implement the `# TODO` markers:
+
+1. **TODO 1 & 2**: Implement `load_state()` reading `agent_state.json` or returning clean defaults.
+2. **TODO 3**: Implement `save_state()` writing structured state to disk.
+3. **TODO 4**: Implement `query_ollama_with_retry()` with exponential backoff (`wait = 2 ** attempt`).
+4. **TODO 5 & 6**: Implement `hitl_gate()` prompting for user input on high/critical actions.
+5. **TODO 7–13**: Build `run_audit_job()` updating audit counters and logging findings.
+6. **TODO 14 & 15**: Register the job with `schedule.every(2).minutes.do(run_audit_job)` and enter the execution loop.
+
+Run your autonomous agent:
+
 ```powershell
 python exercises/ex05_scheduled_autonomous_agent.py
 ```
 
-### Step 6: Compare with the Production Solution
-
-Inspect and run the reference implementation:
-```powershell
-python solutions/sol05_scheduled_autonomous_agent.py
-```
-
-Notice how `sol05_scheduled_autonomous_agent.py`:
-1. Renders a sleek Bento-themed Rich dashboard displaying system health, last run timestamp, and upcoming scheduled iterations.
-2. Intercepts the simulated log purge with the interactive HITL prompt.
-3. Automatically writes and updates `agent_state.json`. Inspect the file:
-```powershell
-Get-Content agent_state.json | ConvertFrom-Json | Format-List
-```
-
----
-
-## 💡 Hints & Deep-Dive Insights
+**Success criteria**: 
+- The script executes Audit Cycle #1 immediately upon launch.
+- Intercepts the simulated firewall change with the interactive `[y/N]` prompt.
+- Writes valid checkpoint JSON to `agent_state.json`.
+- Runs recurring audits every 2 minutes without crashing.
 
 <details>
-<summary>💡 Hint 1: Why State Persistence Must Be Atomic</summary>
+<summary>💡 Hints (click to expand)</summary>
 
-In production systems, if an agent crashes midway through writing `agent_state.json`, the file can become corrupted (half-written JSON). 
-
-Best practice for production state checkpointing is **atomic writing**:
-```python
-import tempfile
-import os
-
-def atomic_save_state(state: dict, filepath: Path) -> None:
-    temp_dir = filepath.parent
-    with tempfile.NamedTemporaryFile("w", dir=temp_dir, delete=False, encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-        temp_name = f.name
-    os.replace(temp_name, filepath)  # Atomic on POSIX and modern Windows NTFS
-```
-This guarantees that `agent_state.json` is either 100% written or unchanged, preventing state corruption during unexpected power loss or process termination.
+- Inspect `agent_state.json` in another terminal: `Get-Content agent_state.json | ConvertFrom-Json`.
+- Notice how shutting down the script (Ctrl+C) and restarting it retains the previous `run_count`!
+- Check `solutions/sol05_scheduled_autonomous_agent.py` for the complete reference implementation.
 </details>
 
-<details>
-<summary>💡 Hint 2: Designing Idempotent Agent Tools</summary>
+### Bonus Challenge: Test Crash Resilience
 
-When an agent runs on a schedule (e.g. every 5 minutes), actions must be **idempotent** — meaning executing the action once or five times produces the identical desired system state without side effects.
-
-- **Non-Idempotent Action**: `append_line_to_hosts_file("127.0.0.1 blocked.domain")` (runs every 5 minutes, adding duplicate lines indefinitely).
-- **Idempotent Action**: `ensure_host_entry_exists("127.0.0.1", "blocked.domain")` (checks if present first; only adds if missing).
-
-Always design scheduled agent actions with idempotency in mind.
-</details>
-
-<details>
-<summary>💡 Hint 3: HITL Timeout & Fail-Safe Defaults</summary>
-
-What happens if an autonomous agent requests human approval at 3:00 AM on a Saturday when no human is at the terminal?
-
-Production HITL architectures implement:
-1. **Default-Deny Policy**: If no human response is received within a timeout period (e.g. 5 minutes), the action defaults to `REJECTED` and an alert is dispatched to an on-call notification channel (e.g., PagerDuty, Slack).
-2. **Escalation Path**: If approval is pending for more than 15 minutes, the task is marked as `BLOCKED_WAITING_APPROVAL` in the state database, and the agent continues executing non-dependent, low-risk audit tasks.
-</details>
-
----
-
-## ✅ Verification Checklist
-
-Ensure you have completed all objectives for Lab 05:
-
-- [ ] Ran `exercises/ex05_scheduled_autonomous_agent.py` and implemented all TODO markers.
-- [ ] Confirmed that `agent_state.json` is created and correctly increments `run_count` across separate runs.
-- [ ] Tested the HITL gate: answered `y` and verified the action is recorded in `action_log`.
-- [ ] Tested the HITL gate: answered `n` and verified the rejection is recorded without executing.
-- [ ] Verified that transient errors trigger exponential backoff retry rather than crashing the script.
-- [ ] Executed `solutions/sol05_scheduled_autonomous_agent.py` to compare against production Rich formatting.
+1. Start `solutions/sol05_scheduled_autonomous_agent.py`.
+2. Let it complete Run #1 and save state.
+3. Hit `Ctrl+C` to kill the process.
+4. Restart the script: notice how it reads `agent_state.json` and seamlessly increments to Run #2!
 
 ---
 
 <details>
-<summary>🔧 Common Lab Errors & Fixes</summary>
+<summary>🔧 <strong>Common Mistakes & Troubleshooting</strong> (click to expand)</summary>
 
-### 1. `ImportError: No module named 'schedule'`
-**Cause**: The `schedule` library is not installed in your active Python environment.  
-**Fix**: Install dependencies using:
-```powershell
-pip install -r requirements.txt
-```
+### Common Mistakes
 
-### 2. `json.decoder.JSONDecodeError` when reading `agent_state.json`
-**Cause**: The state file was manually edited or interrupted mid-write, leaving invalid JSON syntax.  
-**Fix**: Delete the corrupted state file:
-```powershell
-Remove-Item agent_state.json
-```
-The script will regenerate a clean, default state file on the next run.
+| Mistake | What Happens | Fix |
+|---|---|---|
+| Blocking the scheduling loop with `time.sleep(120)` | `schedule.run_pending()` misses scheduled window | Use `time.sleep(1)` inside a continuous `while True` loop |
+| Forgetting encoding in state read/write | Unicode errors on non-English locales | Always specify `encoding="utf-8"` in file read/writes |
+| Auto-approving critical actions without review | Destructive operations execute unchecked | Always enforce strict `risk_level in ("high", "critical")` checks |
 
-### 3. Agent hangs or misses schedule intervals
-**Cause**: An Ollama API call took longer than the schedule interval, or the main thread was blocked waiting for user input at the HITL gate.  
-**Fix**: In production, heavy tool tasks and HITL gates run in background worker threads or Celery queues so the main scheduling loop is never blocked. For this single-process lab, ensure you respond promptly to the HITL prompt or set the schedule interval to at least 2 minutes.
+### Troubleshooting
+
+- **"ImportError: No module named 'schedule'"**: Run `pip install schedule`.
+- **"Corrupted state file"**: Delete `agent_state.json`; the agent will automatically regenerate a clean state file on the next run.
 
 </details>
 
 ---
 
-## 🎓 Next Steps & Continued Learning
+# Summary
 
-Congratulations! You have completed the entire **AI to Agents Session Lab** curriculum:
-1. **Lab 00**: Set up Ollama on CPU and mastered GGUF quantization tuning.
-2. **Lab 01**: Dissected BPE tokenization, embeddings, and next-token prediction mathematics.
-3. **Lab 02**: Benchmarked Prefill (TTFT) vs. Decode throughput and verified KV Cache acceleration.
-4. **Lab 03**: Authored custom Modelfiles and enforced deterministic structured JSON outputs.
-5. **Lab 04**: Engineered a pure-Python ReAct reasoning and tool-calling loop from scratch.
-6. **Lab 05**: Built an autonomous scheduled agent with state persistence, retry resilience, and HITL safety guardrails.
+## 🔑 Key Takeaways
 
-To continue advancing your generative AI and agentic engineering skills, explore these official Microsoft Learn paths:
-- [Fundamentals of Generative AI](https://learn.microsoft.com/en-us/training/modules/fundamentals-generative-ai/?wt.mc_id=studentamb_296178)
-- [Introduction to Generative AI](https://learn.microsoft.com/en-us/training/paths/introduction-generative-ai/?wt.mc_id=studentamb_296178)
+1. **State persistence enables resilience**: Without checkpointing to disk, scheduled agents lose all memory when restarted.
+2. **Exponential backoff handles transient load**: Backing off (`1s, 2s, 4s`) keeps the agent alive during temporary CPU spikes.
+3. **Human-in-the-Loop is essential for safety**: Guardrails guarantee that destructive actions are never executed without human authorization.
 
-[⬅️ Previous Lab: ReAct Agent From Scratch](lab-04-react-agent-from-scratch.md) | [🏠 Home: README](../README.md)
+---
+
+## 🎓 Course Completion & Next Steps
+
+Congratulations! You have completed all six labs in the **AI to Agents Session Lab** curriculum:
+
+- **Lab 00**: Zero-GPU Ollama Setup, GGUF Q4_K_M & CPU Memory Tuning
+- **Lab 01**: LLM Theory, BPE Tokenization, Vector Embeddings & Next-Token Math
+- **Lab 02**: Prompt-to-Answer Pipeline, Prefill vs. Decode, and KV Cache Speedup
+- **Lab 03**: Ollama CLI, Custom `secops-mentor` Modelfiles & Pydantic JSON
+- **Lab 04**: Pure-Python ReAct Reasoning & Tool-Calling Loop
+- **Lab 05**: Autonomous Scheduled Agent with State Persistence & HITL Safety
+
+To continue expanding your knowledge of artificial intelligence and enterprise agentic engineering, explore the official Microsoft Learn paths:
+
+- 🌟 [Microsoft Learn: Fundamentals of Generative AI](https://learn.microsoft.com/en-us/training/modules/fundamentals-generative-ai/?wt.mc_id=studentamb_296178)
+- 🌟 [Microsoft Learn: Introduction to Generative AI Path](https://learn.microsoft.com/en-us/training/paths/introduction-generative-ai/?wt.mc_id=studentamb_296178)
+
+---
+
+**[⬅️ Back to Course Home](../README.md)**

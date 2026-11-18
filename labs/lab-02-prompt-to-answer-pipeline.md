@@ -1,321 +1,224 @@
-<p align="center">
-  <img src="../assets/bento/hero-banner.svg" alt="AI to Agents Session Lab" width="100%"/>
-</p>
-
-![Lab 02](https://img.shields.io/badge/Lab%2002-Prompt%20to%20Answer%20Pipeline-FACC15?style=for-the-badge&labelColor=0E1013&logoColor=FACC15)
-![Time](https://img.shields.io/badge/Time-45%20min-white?style=for-the-badge&labelColor=0E1013)
-![Difficulty](https://img.shields.io/badge/Difficulty-Intermediate-FACC15?style=for-the-badge&labelColor=0E1013)
-![CPU Only](https://img.shields.io/badge/CPU%20Only-No%20GPU%20Required-FACC15?style=for-the-badge&labelColor=0E1013)
-
-[⬅️ Previous Lab](lab-01-llm-theory-and-tokens.md) | [🏠 Home](../README.md) | [➡️ Next Lab](lab-03-ollama-cli-and-modelfile.md)
-
+---
+layout: default
+title: "Lab 02: Prompt-to-Answer Pipeline & KV Cache"
 ---
 
-# Lab 02: The Prompt-to-Answer Pipeline
+![Lab 02: Prompt-to-Answer Pipeline & KV Cache](../assets/images/header-lab-02.svg)
+
+> **Inside inference: Benchmark Phase 1 Prefill (parallel matmul) vs. Phase 2 Decode (memory-bound) and measure real KV Cache acceleration on your CPU.**
+
+Welcome to Lab 02! Have you ever wondered why your terminal pauses momentarily right after hitting Enter before the first word appears, and then streams the rest of the answer steadily token-by-token? In this lab, we look inside the inference lifecycle of a prompt. You'll measure Time-to-First-Token (TTFT), understand why the Key-Value (KV) Cache is essential for conversational AI, and experiment with sampling parameters (`temperature`, `top_k`, `top_p`).
+
+> ⚠️ **Prerequisites**: Make sure you have completed **[Lab 01: LLM Theory, Tokens & Embeddings](lab-01-llm-theory-and-tokens.md)**. Ensure both `qwen2.5:1.5b` and `llama3.2:1b` are pulled in Ollama.
 
 ## 🎯 Learning Objectives
 
-By the end of this lab you will be able to:
+By the end of this lab, you'll be able to:
 
-- Describe the complete lifecycle of an LLM request from text input to streamed output
-- Distinguish between the **Prefill** and **Decode** phases and explain why each is bottlenecked by different hardware resources
-- Explain what the KV Cache is, what it stores, and how it affects repeated queries
-- Extract and interpret timing metrics from the Ollama API response
-- Tune `temperature`, `top_k`, `top_p`, and `num_ctx` to control generation quality and speed
+- Dissect the two distinct computational phases of inference: Prefill vs. Decode
+- Explain why Prefill is compute-bound while Decode is memory-bandwidth-bound on CPU
+- Measure Time-to-First-Token (`prompt_eval_duration`) and generation throughput (`eval_duration`)
+- Quantify the speedup of a warm Key-Value (KV) Cache on multi-turn conversations
+- Control generation creativity and determinism using `temperature`, `top_k`, and `top_p`
 
----
-
-## 📚 Theory
-
-### 1. Full Request Lifecycle
-
-Every call to `/api/generate` or `/api/chat` follows this exact sequence:
-
-```
-User sends prompt text
-        │
-        ▼
-  ┌─────────────┐
-  │  Tokenizer  │  text → token IDs (integers)
-  └──────┬──────┘
-         │
-         ▼
-  ┌─────────────┐
-  │  Embeddings │  IDs → dense vectors (input to Transformer)
-  └──────┬──────┘
-         │
-         ▼
-  ╔══════════════════════════════════╗
-  ║  PHASE 1: PREFILL                ║
-  ║  All input tokens processed      ║
-  ║  simultaneously (parallel)       ║
-  ║  → Builds KV Cache               ║
-  ║  → Outputs first-token logits    ║
-  ╚══════════════════════════════════╝
-         │
-         ▼
-  ╔══════════════════════════════════╗
-  ║  PHASE 2: DECODE (loop)          ║
-  ║  One token generated per step    ║
-  ║  Uses KV Cache, appends result   ║
-  ║  → Repeats until EOS or max_len  ║
-  ╚══════════════════════════════════╝
-         │
-         ▼
-  ┌─────────────┐
-  │ Detokenizer │  token IDs → human-readable text
-  └──────┬──────┘
-         │
-         ▼
-  Streamed response to caller
-```
-
-![Prompt to Answer](../assets/bento/prompt-to-answer-animated.svg)
+> ⏱️ **Estimated Time**: ~45 minutes (15 min reading + 30 min hands-on)
 
 ---
 
-### 2. Phase 1 — Prefill (Compute-Bound)
+# Real-World Analogy: Reading the Case File vs. Dictating the Verdict
 
-During Prefill, the model processes **all input tokens at the same time** using parallel matrix multiplication.
+Think of an LLM as a judge presiding over a legal trial:
 
-- Every token in your prompt attends to every other token simultaneously
-- This is compute-intensive: more input tokens = proportionally more FLOPs
-- The result is stored in the **KV Cache** (Key-Value Cache)
-- The latency of Prefill is your **Time-To-First-Token (TTFT)** — Ollama reports this as `prompt_eval_duration`
+- **Phase 1: Prefill (Reading the Case File)**: When you hand the judge a 10-page document (your prompt), the judge can read and cross-reference all 10 pages at once. The judge highlights key passages and takes shorthand notes. This is **compute-intensive** (parallel matrix multiplication), and until the judge finishes reading, no words can be spoken. The time taken to read is your **Time-to-First-Token (TTFT)**.
+- **The KV Cache (The Shorthand Notes)**: The judge keeps those summary notes on their desk.
+- **Phase 2: Decode (Dictating the Verdict)**: The judge now speaks the verdict one word at a time. Each new word spoken depends on what was said before it, so the judge glances at their shorthand notes (KV Cache) rather than re-reading the entire 10-page file from scratch!
 
-**Why compute-bound?** The GPU/CPU arithmetic units are the bottleneck. Memory bandwidth is not the limiting factor because all matrix operations happen in one large batch.
-
-```
-TTFT ≈ num_input_tokens × constant_per_token
-```
-
-A prompt of 4096 tokens takes roughly 4× as long to prefill as a 1024-token prompt.
+<p align="center">
+  <img src="../assets/diagrams/05-prefill-vs-decode-kv-cache.png" alt="Prefill vs Decode & KV Cache" width="90%"/>
+</p>
 
 ---
 
-### 3. Phase 2 — Decode (Memory-Bandwidth-Bound)
+## The Complete Prompt-to-Answer Pipeline
 
-After Prefill, the model generates **one token per step** in an autoregressive loop:
+Here is the exact journey your prompt takes through the neural network:
 
-1. Take the most recently generated token
-2. Run it through all Transformer layers (each reading from the KV Cache)
-3. Sample the next token from the output distribution
-4. Append it to the history → go to step 1
+<p align="center">
+  <img src="../assets/bento/prompt-to-answer-animated.svg" alt="Prompt to Answer Animated Pipeline" width="100%"/>
+</p>
 
-- Decode is **memory-bandwidth-bound**: the bottleneck is reading the KV Cache and model weights from RAM on every step
-- On CPU with 4 GB RAM, typical decode speed is 5–20 tokens/sec for a 1.5B model
-- Ollama reports total decode time as `eval_duration`
-
-**Tokens-per-second (TPS) formula:**
 ```
-TPS = eval_count / (eval_duration / 1e9)
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ 1. User Prompt (Raw String)                                            │
+  │    "Explain what a firewall does in 3 sentences."                      │
+  │      │                                                                 │
+  │      ▼                                                                 │
+  │ 2. BPE Tokenizer -> [1542, 1102, 264, 18921, ...]                      │
+  │      │                                                                 │
+  │      ▼                                                                 │
+  │ 3. Phase 1: Prefill (Compute-Bound / Parallel Matrix Multiplication)   │
+  │    All prompt tokens evaluated simultaneously.                         │
+  │    Key (K) and Value (V) tensors calculated and saved to KV Cache.     │
+  │    Metric: prompt_eval_duration (Time-to-First-Token)                  │
+  │      │                                                                 │
+  │      ▼                                                                 │
+  │ 4. Phase 2: Autoregressive Decode (Memory-Bandwidth-Bound / Sequential)│
+  │    Token 1 generated -> Appended to KV Cache                           │
+  │    Token 2 generated -> Appended to KV Cache                           │
+  │    Metric: eval_duration / eval_count (Tokens Per Second)              │
+  │      │                                                                 │
+  │      ▼                                                                 │
+  │ 5. Sampling Knobs (Logits -> Token Selection)                          │
+  │    Temperature, Top-K, Top-P filter candidate probabilities.           │
+  │      │                                                                 │
+  │      ▼                                                                 │
+  │ 6. Detokenizer -> "A firewall is a network security device that..."    │
+  └────────────────────────────────────────────────────────────────────────┘
 ```
-(Ollama reports durations in nanoseconds)
 
 ---
 
-### 4. KV Cache Mechanics
+## Sampling Knobs: Controlling Generation
 
-![Prefill vs Decode KV Cache](../assets/diagrams/05-prefill-vs-decode-kv-cache.png)
+Once the model computes logits (raw prediction scores) across its 150,000+ vocabulary tokens, the final token is selected using three critical parameters:
 
-The **Key-Value Cache** stores intermediate attention computations from every past token. This avoids recomputing attention over the entire history on every decode step.
-
-| Cache state | Effect |
-|---|---|
-| **Cold cache** (first query) | Full Prefill required; TTFT proportional to prompt length |
-| **Warm cache** (same context, follow-up) | Prefill only over new tokens; dramatically lower TTFT |
-| **Cache evicted** (long conversation or restart) | Full cold Prefill for entire history |
-
-**What is stored in the cache?**
-- For every Transformer layer: a matrix of Key vectors and a matrix of Value vectors for every token seen so far
-- Cache size (bytes) ≈ `2 × num_layers × num_heads × head_dim × num_tokens × bytes_per_element`
-- For `qwen2.5:1.5b` at Q4_K_M: roughly 1 MB per 1024 context tokens
-
-> [!WARNING]
-> Setting `num_ctx` very large (e.g. 32768) on a 4 GB RAM machine will allocate a large KV Cache upfront and may cause OOM even before any tokens are generated.
+| Parameter | Default | Range | Impact on Generation |
+|---|:---:|:---:|---|
+| **`temperature`** | `0.7` | `0.0 - 2.0` | Controls randomness. `0.0` is completely greedy / deterministic (always picks the highest probability token). Higher values flatten the distribution, increasing creativity. |
+| **`top_k`** | `40` | `1 - 100` | Hard cutoff. Restricts candidate selection to only the top $K$ most probable tokens, discarding the long tail of low-probability words. |
+| **`top_p`** | `0.9` | `0.0 - 1.0` | Nucleus sampling. Accumulates tokens until their cumulative probability exceeds $P$. Dynamically narrows vocabulary when confidence is high. |
+| **`num_ctx`** | `2048` | `512 - 32768` | Size of the context window buffer allocated in RAM for the KV Cache. |
 
 ---
 
-### 5. Measuring Real Timing
+## See It In Action
 
-Ollama's `/api/generate` response includes rich timing metadata when you set `"stream": false`:
+### Demo 1: Inspecting Raw Timing Metadata from Ollama
+
+When you send a request to Ollama's `/api/generate` with `stream=False`, Ollama returns nanosecond-precision timing data in the response JSON:
 
 ```python
 import requests
 
-resp = requests.post(
-    "http://localhost:11434/api/generate",
-    json={
-        "model": "qwen2.5:1.5b",
-        "prompt": "Explain what a firewall does in one sentence.",
-        "stream": False,
-        "options": {"num_ctx": 2048}
-    }
-)
-data = resp.json()
+payload = {
+    "model": "qwen2.5:1.5b",
+    "prompt": "What is an IP address?",
+    "stream": False
+}
 
-# All durations are in nanoseconds
-ttft_ms        = data["prompt_eval_duration"] / 1e6   # Prefill (TTFT)
-decode_ms      = data["eval_duration"] / 1e6           # Decode total
-prompt_tokens  = data["prompt_eval_count"]             # Tokens in prompt
-output_tokens  = data["eval_count"]                    # Tokens generated
-tps            = output_tokens / (data["eval_duration"] / 1e9)
+res = requests.post("http://localhost:11434/api/generate", json=payload).json()
 
-print(f"TTFT:          {ttft_ms:.1f} ms")
-print(f"Decode time:   {decode_ms:.1f} ms")
-print(f"Prompt tokens: {prompt_tokens}")
-print(f"Output tokens: {output_tokens}")
-print(f"Speed:         {tps:.1f} tok/s")
+# Nanoseconds to seconds conversion (1e9)
+ttft_sec = res["prompt_eval_duration"] / 1e9
+decode_sec = res["eval_duration"] / 1e9
+tokens_per_sec = res["eval_count"] / decode_sec
+
+print(f"Time-to-First-Token (Prefill): {ttft_sec:.3f} s")
+print(f"Generation Speed (Decode):     {tokens_per_sec:.1f} tokens/sec")
+print(f"Total Output Tokens:           {res['eval_count']} tokens")
 ```
 
-| Ollama field | Meaning | Unit |
-|---|---|---|
-| `prompt_eval_duration` | Prefill time (TTFT) | nanoseconds |
-| `eval_duration` | Decode time | nanoseconds |
-| `prompt_eval_count` | Input token count | tokens |
-| `eval_count` | Output token count | tokens |
-| `load_duration` | Model load time (0 if already loaded) | nanoseconds |
-| `total_duration` | End-to-end wall time | nanoseconds |
+<details>
+<summary>🎬 See it in action!</summary>
+
+```text
+Time-to-First-Token (Prefill): 0.182 s
+Generation Speed (Decode):     31.4 tokens/sec
+Total Output Tokens:           68 tokens
+```
+</details>
+
+**The takeaway**: Ollama automatically profiles every inference request. `prompt_eval_duration` measures the initial reading speed (Prefill), while `eval_duration` measures writing throughput (Decode).
 
 ---
 
-### 6. Sampling Knobs
+### Demo 2: Measuring Cold vs. Warm KV Cache Speedup
 
-The model outputs a probability distribution over all ~32k vocabulary tokens. **Sampling parameters** control how you pick from that distribution:
+What happens when you send the exact same long prompt twice in a row?
 
-| Parameter | What it controls | Practical effect |
-|---|---|---|
-| `temperature` | Scales logits before softmax. >1 flattens distribution (more random), <1 sharpens it (more deterministic) | 0.0 = greedy (always most likely token); 1.0 = default; 2.0 = creative/chaotic |
-| `top_k` | Only consider the top K most probable tokens | `top_k=1` = greedy; `top_k=40` = common default |
-| `top_p` | Nucleus sampling: take the smallest set of tokens whose cumulative probability ≥ p | `top_p=0.9` = typical; filters unlikely long tails |
-| `num_ctx` | Context window size (tokens). Limits how much history the model can attend to | Larger = slower Prefill + bigger KV Cache |
-| `repeat_penalty` | Penalise tokens that have already appeared | >1.0 reduces repetition; 1.1 is a mild setting |
-
-> [!TIP]
-> For deterministic, repeatable output (useful in automated pipelines): set `temperature=0.0`, `top_k=1`, `top_p=1.0`.
-> For creative brainstorming: `temperature=0.8`, `top_k=50`, `top_p=0.95`.
+1. **Run 1 (Cold Cache)**: Ollama must read the entire prompt, calculate $K$ and $V$ tensors for every token, and allocate memory.
+2. **Run 2 (Warm Cache)**: Ollama identifies that the prompt tokens match existing entries in the KV Cache and reuses them instantly!
 
 ---
 
-## 🔬 Hands-On Steps
+## 📝 Assignment
 
-### Step 1 — Run the Benchmark Exercise
+### Main Challenge: Benchmark Prefill & Decode with `ex02_prefill_decode_benchmark.py`
 
-```bash
+Open `exercises/ex02_prefill_decode_benchmark.py` and implement the `# TODO` markers:
+
+1. **TODO 1**: Build `run_inference(model, prompt, options)` sending parameters to `/api/generate`.
+2. **TODO 2**: Execute Run 1 (cold) and Run 2 (warm) with an identical security prompt.
+3. **TODO 3**: Calculate the Speedup Ratio: $\frac{\text{Cold TTFT}}{\text{Warm TTFT}}$.
+4. **TODO 4**: Perform a temperature sweep (`[0.0, 0.5, 1.0]`) and observe output variability.
+5. **TODO 5**: Compare `qwen2.5:1.5b` vs. `llama3.2:1b` throughput side-by-side.
+
+Run your benchmark:
+
+```powershell
 python exercises/ex02_prefill_decode_benchmark.py
 ```
 
-The script sends the same prompt at different context lengths and plots TTFT vs. prompt token count, then shows TPS at different output lengths.
+**Success criteria**: Your terminal renders a Rich benchmark table showing that Run 2 achieves a significant TTFT speedup (often 2x–5x faster) thanks to KV Cache reuse.
 
-### Step 2 — Experiment with Sampling
+<details>
+<summary>💡 Hints (click to expand)</summary>
 
-Modify the script to send the same prompt three times with different temperature settings:
-- `temperature=0.0` (deterministic)
-- `temperature=0.7` (balanced)
-- `temperature=1.5` (highly random)
+- To ensure the model remains resident in memory between runs, keep `OLLAMA_KEEP_ALIVE=5m`.
+- Notice how `temperature=0.0` produces the exact same words on every repeat execution.
+- Notice how `llama3.2:1b` achieves even higher token generation speeds (> 45 tokens/sec) due to its smaller parameter footprint.
+- Check `solutions/sol02_prefill_decode_benchmark.py` to compare your implementation.
+</details>
 
-Compare the outputs and timing. Notice that temperature does **not** affect speed — it only affects which token is selected from the already-computed distribution.
+### Bonus Challenge: Experiment with Context Window Size (`num_ctx`)
 
-### Step 3 — Observe KV Cache Warmth
-
-Send the same system prompt twice in quick succession and compare `prompt_eval_duration`:
-
-```python
-# First call — cold cache
-resp1 = send_request(long_system_prompt)
-# Second call — warm cache (same session)
-resp2 = send_request(long_system_prompt)
-# resp2["prompt_eval_duration"] should be significantly lower
-```
+Modify the `options` dictionary in your call to test `num_ctx: 1024` vs `num_ctx: 8192`:
+- Does increasing `num_ctx` increase the initial RAM allocation?
+- Check task manager while the test is running!
 
 ---
 
-<details><summary>💡 Hint 1 — Why is Prefill compute-bound but Decode memory-bandwidth-bound? (Click to expand)</summary>
+<details>
+<summary>🔧 <strong>Common Mistakes & Troubleshooting</strong> (click to expand)</summary>
 
-**Prefill is compute-bound** because all input tokens are processed in one giant batch. The attention operation involves multiplying large matrices (Q × K^T), which is arithmetic-intensive. The GPU/CPU arithmetic units are saturated; memory bandwidth is relatively underutilised because the data fits in cache for the batch.
+### Common Mistakes
 
-**Decode is memory-bandwidth-bound** because only **one token** is processed per step. The batch size is 1. The model must read the entire KV Cache (potentially hundreds of MB) and all layer weights on every single step, but does only a tiny amount of arithmetic with that data. The ratio of memory reads to compute is very high — the memory bus is the bottleneck.
-
-This is why faster RAM (DDR5 vs DDR4) improves decode speed more than a faster CPU core clock.
-
-</details>
-
-<details><summary>💡 Hint 2 — How to measure TTFT accurately (Click to expand)</summary>
-
-**Option A — Non-streaming (simpler):**
-```python
-import time
-start = time.perf_counter()
-resp = requests.post(url, json=payload)
-# TTFT is not accurately measured here — total time includes network + decode
-```
-
-**Option B — Streaming (accurate TTFT):**
-```python
-import time, requests, json
-
-start = time.perf_counter()
-first_token_time = None
-
-with requests.post(url, json={**payload, "stream": True}, stream=True) as r:
-    for line in r.iter_lines():
-        if line:
-            chunk = json.loads(line)
-            if first_token_time is None and chunk.get("response"):
-                first_token_time = time.perf_counter() - start
-                print(f"TTFT: {first_token_time*1000:.1f} ms")
-```
-
-**Option C — From Ollama metadata (non-streaming):**
-```python
-# Use prompt_eval_duration from the response (most accurate, Ollama-measured)
-ttft_ms = data["prompt_eval_duration"] / 1_000_000
-```
-
-Option C is preferred because it excludes network overhead and is measured inside the Ollama process.
-
-</details>
-
-<details><summary>💡 Hint 3 — Effect of temperature=0 vs temperature=1 (Click to expand)</summary>
-
-| Setting | Behaviour | Use case |
+| Mistake | What Happens | Fix |
 |---|---|---|
-| `temperature=0` | Greedy decoding — always picks the single most probable token. Output is **deterministic** and **reproducible** | Structured output, JSON, code, automated testing |
-| `temperature=0.7` | Moderate randomness — high-probability tokens still dominate, but occasional variation allowed | General chat, summaries, Q&A |
-| `temperature=1.0` | Raw model distribution — no scaling applied. Standard creative generation | Creative writing, brainstorming |
-| `temperature=1.5+` | Artificially flattened — unlikely tokens get boosted. Output becomes incoherent quickly | Avoid in production |
+| Setting `temperature: 0` for creative tasks | Output becomes robotic, repetitive, and stiff | Use `temperature: 0.7` for creative writing, `0.0 - 0.2` for JSON & code |
+| Measuring TTFT with `stream: True` using total clock time | Confuses network streaming with model evaluation | Always use the server-reported `prompt_eval_duration` for accurate TTFT |
+| Running benchmarks while heavy background apps use CPU | Inconsistent latency spikes | Close video rendering or gaming apps while benchmarking CPU inference |
 
-**Important:** `temperature=0` does not change **speed**. The softmax computation still runs; it just becomes a winner-take-all selection. The latency difference you might observe comes from shorter outputs (fewer decode steps) when greedy decoding produces EOS sooner.
+### Troubleshooting
 
-</details>
-
----
-
-## ✅ Verification
-
-- [ ] `python exercises/ex02_prefill_decode_benchmark.py` completes and prints timing data
-- [ ] You can read `prompt_eval_duration` and `eval_duration` from an Ollama API response
-- [ ] You can explain in one sentence why decode speed is limited by RAM bandwidth, not CPU speed
-- [ ] You set `temperature=0.0` and confirmed the output is identical across two calls with the same prompt
-
----
-
-<details><summary>🔧 Common Lab Errors & Fixes</summary>
-
-**`KeyError: 'prompt_eval_duration'` in response**
-> This field is only present when `"stream": false`. With streaming, you must parse the final JSON chunk (the one with `"done": true`), which contains all timing metadata.
-
-**TTFT is 0 ms on the second identical call**
-> This is correct — the KV Cache was warm, so there was no Prefill work to do. This is the expected behaviour and shows the cache working as intended.
-
-**TPS is very low (< 2 tok/s)**
-> RAM is likely swapped to disk. Check: `ollama ps` — if the model shows "100% GPU" but you have no GPU, something is misconfigured. Restart Ollama and check that `OLLAMA_MAX_LOADED_MODELS=1` is set.
-
-**`num_ctx` causes OOM crash**
-> Reduce `num_ctx` to 2048 or 1024. On 4 GB RAM machines, do not exceed `num_ctx=4096` with any model larger than 1.5B.
+- **"High TTFT on first run (> 5s)"**: This includes initial weight loading from SSD to RAM. The second run reflects genuine warm KV cache inference.
+- **"Out of memory during inference"**: Reduce `num_ctx` in options (e.g. `num_ctx: 2048`).
 
 </details>
 
 ---
 
-[⬅️ Previous Lab](lab-01-llm-theory-and-tokens.md) | [🏠 Home](../README.md) | [➡️ Next Lab](lab-03-ollama-cli-and-modelfile.md)
+# Summary
+
+## 🔑 Key Takeaways
+
+1. **Prefill is parallel (Compute-Bound)**: All prompt tokens are evaluated in parallel to initialize the Key-Value (KV) Cache.
+2. **Decode is serial (Memory-Bandwidth-Bound)**: New tokens are generated one-by-one; CPU memory bus speed is the primary performance bottleneck.
+3. **The KV Cache prevents $O(N^2)$ recalculation**: By storing computed key and value tensors, multi-turn chat sessions remain fast and responsive.
+
+---
+
+## ➡️ What's Next
+
+Now that you've mastered prompt mechanics and inference parameters, let's learn how to package custom local assistants and enforce strict JSON schemas!
+
+In **[Lab 03: Ollama CLI & Custom Modelfiles](lab-03-ollama-cli-and-modelfile.md)**, you'll learn:
+
+- How to inspect and manage models using the Ollama CLI
+- How to write a custom `Modelfile` packaging system prompts and sampling parameters
+- How to enforce deterministic JSON output schemas using Pydantic
+- Hands-on client implementation with `exercises/ex03_custom_modelfile_client.py`
+
+---
+
+**[⬅️ Back to Course Home](../README.md)** | **[Continue to Lab 03 ➡️](lab-03-ollama-cli-and-modelfile.md)**

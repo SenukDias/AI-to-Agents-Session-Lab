@@ -1,94 +1,83 @@
-<p align="center">
-  <img src="../assets/bento/hero-banner.svg" alt="AI to Agents Session Lab" width="100%"/>
-</p>
-
-![Lab 03](https://img.shields.io/badge/Lab%2003-Ollama%20CLI%20%26%20Modelfile-FACC15?style=for-the-badge&labelColor=0E1013&logoColor=FACC15)
-![Time](https://img.shields.io/badge/Time-40%20min-white?style=for-the-badge&labelColor=0E1013)
-![Difficulty](https://img.shields.io/badge/Difficulty-Intermediate-FACC15?style=for-the-badge&labelColor=0E1013)
-![CPU Only](https://img.shields.io/badge/CPU%20Only-No%20GPU%20Required-FACC15?style=for-the-badge&labelColor=0E1013)
-
-[⬅️ Previous Lab](lab-02-prompt-to-answer-pipeline.md) | [🏠 Home](../README.md) | [➡️ Next Lab](lab-04-react-agent-from-scratch.md)
-
+---
+layout: default
+title: "Lab 03: Ollama CLI & Custom Modelfiles"
 ---
 
-# Lab 03: Ollama CLI & Custom Modelfile
+![Lab 03: Ollama CLI & Custom Modelfiles](../assets/images/header-lab-03.svg)
+
+> **Build custom local AI assistants using Ollama Modelfiles and enforce 100% deterministic, structured JSON schemas with Pydantic validation.**
+
+Welcome to Lab 03! When building production applications and agents, raw free-text completions are dangerous. If an LLM returns unexpected conversational chatter, your downstream software will crash with JSON parsing errors. In this lab, you will master the Ollama CLI, package a custom DevSecOps assistant (`secops-mentor`) using an Ollama `Modelfile`, and enforce rigid structured JSON outputs using Pydantic validation.
+
+> ⚠️ **Prerequisites**: Make sure you've completed **[Lab 02: Prompt-to-Answer Pipeline & KV Cache](lab-02-prompt-to-answer-pipeline.md)**. Ensure `pydantic>=2.5.0` is installed (`pip install -r requirements.txt`).
 
 ## 🎯 Learning Objectives
 
-By the end of this lab you will be able to:
+By the end of this lab, you'll be able to:
 
-- Use all core Ollama CLI commands to inspect and manage local models
-- Read and understand GGUF quantization level tradeoffs for CPU inference
-- Write a custom `Modelfile` to create a bespoke persona-tuned model
-- Build and run a custom model with `ollama create` and `ollama run`
-- Use Ollama's `format` parameter to request structured JSON output
-- Validate LLM JSON responses with Pydantic
+- Master advanced Ollama CLI commands (`ollama show --modelfile`, `ollama ps`, `ollama cp`)
+- Understand the quantization spectrum: from FP16 unquantized to GGUF `Q4_K_M` and `Q2_K`
+- Author and build a custom model container using the `Modelfile` syntax
+- Enforce strict JSON output using Ollama's `format="json"` API parameter
+- Validate model outputs against strongly-typed Pydantic data schemas
 
----
-
-## 📚 Theory
-
-### 1. Ollama CLI Reference
-
-| Command | What it does |
-|---|---|
-| `ollama list` | List all locally downloaded models with size and modification date |
-| `ollama ps` | Show models currently loaded in RAM and their memory usage |
-| `ollama show --modelfile <model>` | Print the Modelfile that defines a model (including system prompt, parameters) |
-| `ollama cp <src> <dst>` | Duplicate a model under a new name (creates a lightweight alias) |
-| `ollama rm <model>` | Delete a model and free its disk space |
-| `ollama pull <model>` | Download a model from the Ollama registry |
-| `ollama push <model>` | Upload a model to the Ollama registry (requires login) |
-| `ollama create <name> -f <Modelfile>` | Build a new model from a Modelfile |
-| `ollama run <model>` | Start an interactive REPL session with a model |
-
-**Useful inspection commands:**
-```bash
-# See what parameters and system prompt a model uses
-ollama show --modelfile qwen2.5:1.5b
-
-# Check which models are currently taking up RAM
-ollama ps
-
-# Free up RAM without restarting Ollama
-ollama stop qwen2.5:1.5b
-```
+> ⏱️ **Estimated Time**: ~40 minutes (15 min reading + 25 min hands-on)
 
 ---
 
-### 2. GGUF Quantization Levels
+# Real-World Analogy: The Docker Container for AI Weights
 
-Choosing the right quantization level is a RAM vs quality tradeoff. Here is a practical reference for a **1.5B parameter model** (multiply roughly by 2× for 3B, 4× for 7B):
+Think of a standard foundation model like an unconfigured Linux ISO image:
 
-| Quantization | Bits/weight | RAM usage | Quality vs F16 | Best for |
-|---|---|---|---|---|
-| `F16` | 16 | ~3.1 GB | Baseline (perfect) | GPU with ample VRAM |
-| `Q8_0` | 8 | ~1.6 GB | Negligible loss | 8–16 GB RAM machines |
-| `Q6_K` | 6 | ~1.3 GB | Very small loss | 8 GB RAM machines |
-| **`Q4_K_M`** | **4 (mixed)** | **~1.0 GB** | **Small loss** | **Sweet spot — recommended** |
-| `Q4_K_S` | 4 (small) | ~0.9 GB | Small-medium loss | Tight RAM budgets |
-| `Q3_K_M` | 3 (mixed) | ~0.8 GB | Moderate loss | Very constrained devices |
-| `Q2_K` | 2 | ~0.6 GB | Significant loss | Last resort (4 GB RAM) |
+- A raw model (`qwen2.5:1.5b`) is capable of doing anything, but has no specific role, default temperature, or boundary instructions.
+- An **Ollama Modelfile** is like a **Dockerfile**. It packages the base operating system (`FROM qwen2.5:1.5b`), configures the environment settings (`PARAMETER temperature 0.2`, `PARAMETER num_ctx 4096`), and injects custom startup commands and specialized persona instructions (`SYSTEM """You are SecOps Mentor..."""`).
+- Running `ollama create secops-mentor -f Modelfile` builds a new, immutable AI image that you can deploy, version, and share with your entire team!
 
-> [!TIP]
-> When you run `ollama pull qwen2.5:1.5b`, Ollama automatically selects `Q4_K_M` as the default. To pull a specific quantization: `ollama pull qwen2.5:1.5b:q8_0`
-
-**How k-quants (`_K`) differ from plain quants:**
-- Plain quantization (`Q4_0`) applies the same 4-bit compression to every weight
-- K-quants (`Q4_K_M`) use mixed precision: attention layers (most quality-sensitive) are kept at higher precision, while feed-forward layers are compressed more aggressively
-- Result: better output quality at the same average bit-width
+<p align="center">
+  <img src="../assets/diagrams/06-llm-function-calling.jpeg" alt="LLM Function Calling and Structured Outputs" width="85%"/>
+</p>
 
 ---
 
-### 3. The Modelfile
+## Ollama CLI Command Reference
 
-An Ollama `Modelfile` is a text file (similar to a Dockerfile) that defines a custom model by composing a base model with parameters and a system prompt.
+The Ollama CLI provides complete lifecycle management for local models:
 
-**Repo Modelfile** (`Modelfile` in the repo root):
+| Command | Usage | Description |
+|---|---|---|
+| `ollama list` | `ollama list` | List all models installed locally with their disk sizes and modification dates |
+| `ollama ps` | `ollama ps` | Display active models currently occupying RAM, processor allocation (CPU/GPU), and time remaining |
+| `ollama show --modelfile <model>` | `ollama show --modelfile qwen2.5:1.5b` | Inspect the underlying Modelfile, system prompt, and parameters of any installed model |
+| `ollama create <name> -f <file>` | `ollama create secops-mentor -f Modelfile` | Build and register a custom model from a local Modelfile |
+| `ollama cp <src> <dest>` | `ollama cp qwen2.5:1.5b backup-model` | Create a fast local alias or backup copy of a model without re-downloading |
+| `ollama rm <model>` | `ollama rm backup-model` | Remove an unused model to immediately free disk space |
+
+---
+
+## Understanding Quantization Levels (GGUF)
+
+When models are published by research labs, weights are stored as 16-bit floating-point numbers (`FP16`). Quantization groups and rounds these numbers into smaller bit representations:
+
+| Quantization Format | Bits per Weight | Memory Required (1.5B) | Quality Retention | Recommendation |
+|:---:|:---:|:---:|:---:|---|
+| **`FP16`** | 16.0 | ~3.4 GB | 100.0% | Heavy for laptops; requires GPU |
+| **`Q8_0`** | 8.5 | ~1.8 GB | 99.8% | High precision; good if you have 16 GB+ RAM |
+| **`Q4_K_M`** ⭐ | **4.5** | **~1.0 GB** | **99.2%** | **The Gold Standard: Perfect CPU balance of speed & quality** |
+| **`Q2_K`** | 2.6 | ~0.6 GB | 88.5% | Extreme compression; noticeable degradation |
+
+Ollama's default library tags (such as `qwen2.5:1.5b` and `llama3.2:1b`) are pre-quantized using `Q4_K_M`.
+
+---
+
+## Anatomy of a Production Modelfile
+
+Examine the `Modelfile` located at the root of this repository:
 
 ```dockerfile
+# 1. Base Image
 FROM qwen2.5:1.5b
 
+# 2. Model Parameters (Sampling Knobs)
 PARAMETER temperature 0.2
 PARAMETER top_p 0.9
 PARAMETER top_k 40
@@ -96,6 +85,7 @@ PARAMETER num_ctx 4096
 PARAMETER repeat_penalty 1.1
 PARAMETER stop "<|im_end|>"
 
+# 3. System Persona & Output Contract
 SYSTEM """
 You are SecOps Mentor — a precise, structured AI assistant for cybersecurity operations and DevSecOps workflows.
 Always respond with valid JSON when instructed. Never hallucinate tool names or file paths.
@@ -104,267 +94,164 @@ For threat analysis tasks, structure output as: {"severity": "...", "findings": 
 """
 ```
 
-**Modelfile instruction reference:**
-
-| Instruction | Purpose |
-|---|---|
-| `FROM <model>` | Base model to build on (required) |
-| `PARAMETER <name> <value>` | Override a generation parameter |
-| `SYSTEM <text>` | Set the system prompt injected before every conversation |
-| `TEMPLATE <template>` | Override the chat template (usually not needed) |
-| `MESSAGE <role> <content>` | Inject few-shot examples into the default context |
-
 ---
 
-### 4. Building and Using a Custom Model
+## See It In Action
 
-**Step 1 — Create the model from the repo Modelfile:**
-```bash
+### Demo 1: Creating Your Custom Model
+
+Build the custom `secops-mentor` assistant using the Ollama CLI:
+
+```powershell
+# From the repository root:
 ollama create secops-mentor -f Modelfile
 ```
 
-Ollama will:
-1. Read the `FROM` base model (download if not already present)
-2. Apply the `PARAMETER` overrides
-3. Store the new model as `secops-mentor` (a lightweight config layer on top of the base weights)
+<details>
+<summary>🎬 See it in action!</summary>
 
-**Step 2 — Verify it was created:**
-```bash
+```text
+transferring system prompt
+reading model metadata
+creating new layer sha256:72e25b0...
+writing manifest
+success
+```
+</details>
+
+Verify that your new model appears in the local registry:
+
+```powershell
 ollama list
-# secops-mentor should appear
 ```
 
-**Step 3 — Run an interactive session:**
-```bash
-ollama run secops-mentor
->>> Analyse this log line and return JSON: "FAILED LOGIN from 192.168.1.42 to admin@corp.com"
-```
-
-**Step 4 — Inspect the resulting Modelfile:**
-```bash
-ollama show --modelfile secops-mentor
-```
+**The takeaway**: In less than 3 seconds, you created a specialized local AI model without re-downloading any weights!
 
 ---
 
-### 5. Structured JSON Output with Ollama
+### Demo 2: Structured Pydantic JSON Validation
 
-Ollama supports a `format` parameter that forces the model to output valid JSON. This is crucial for agentic pipelines where you need to parse the response programmatically.
+In Python, we define our desired data schema using **Pydantic**:
 
-**API request with `format="json"`:**
 ```python
-import requests, json
 from pydantic import BaseModel
-from typing import Literal
+from typing import List
 
-OLLAMA_HOST = "http://localhost:11434"
-
-# Define your expected response schema with Pydantic
-class ThreatAnalysis(BaseModel):
-    severity: Literal["low", "medium", "high", "critical"]
-    findings: list[str]
-    remediation: list[str]
-    confidence: float  # 0.0 to 1.0
-
-def analyse_log(log_line: str) -> ThreatAnalysis:
-    prompt = f"""Analyse the following log line and return a JSON object.
-
-Log: {log_line}
-
-Return JSON with keys: severity, findings (list), remediation (list), confidence (0.0-1.0)."""
-
-    resp = requests.post(
-        f"{OLLAMA_HOST}/api/generate",
-        json={
-            "model": "secops-mentor",
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",        # ← Forces valid JSON output
-            "options": {
-                "temperature": 0.2,  # Low temp for structured output
-                "num_ctx": 2048
-            }
-        }
-    )
-
-    raw_json = resp.json()["response"]
-
-    # Validate and parse with Pydantic
-    result = ThreatAnalysis.model_validate_json(raw_json)
-    return result
-
-# Usage
-analysis = analyse_log("FAILED LOGIN from 192.168.1.42 to admin@corp.com (5 attempts in 30s)")
-print(f"Severity: {analysis.severity}")
-print(f"Confidence: {analysis.confidence:.0%}")
+class ThreatReport(BaseModel):
+    severity: str          # "critical", "high", "medium", "low"
+    cve: str               # "CVE-XXXX-XXXX" or "N/A"
+    description: str       # Brief threat summary
+    remediation: List[str] # Specific actionable steps
+    affected_systems: List[str]
 ```
 
-> [!IMPORTANT]
-> `format="json"` guarantees syntactically valid JSON but does **not** guarantee your expected keys are present. Always validate with Pydantic (`model_validate_json`) or wrap in `try/except` to handle schema mismatches.
+When we query Ollama with `format="json"`, the model is constrained to generate valid JSON matching our schema:
+
+```python
+import requests
+import json
+
+prompt = "Analyze Log4Shell vulnerability and provide remediation steps."
+
+response = requests.post(
+    "http://localhost:11434/api/chat",
+    json={
+        "model": "secops-mentor",
+        "messages": [{"role": "user", "content": prompt}],
+        "format": "json",
+        "stream": False
+    }
+)
+
+raw_json = json.loads(response.json()["message"]["content"])
+report = ThreatReport.model_validate(raw_json)
+
+print(f"Severity:    {report.severity.upper()}")
+print(f"CVE ID:      {report.cve}")
+print(f"Action Item: {report.remediation[0]}")
+```
 
 ---
 
-### 6. Why Temperature 0.2 for Structured Output?
+## 📝 Assignment
 
-| Temperature | Effect on JSON output |
-|---|---|
-| `0.0` | Perfectly deterministic. Same input always produces identical JSON. Risk: model may get stuck in a rut if the first token was wrong |
-| `0.1–0.2` | Near-deterministic with tiny variation. **Best for structured output** — allows minor recovery from early wrong choices |
-| `0.5+` | Increases risk of hallucinated keys or values that don't match your schema |
-| `1.0+` | JSON schema compliance degrades significantly |
+### Main Challenge: Complete `exercises/ex03_custom_modelfile_client.py`
 
----
+Open `exercises/ex03_custom_modelfile_client.py` and implement the `# TODO` markers:
 
-## 🔬 Hands-On Steps
+1. **TODO 1**: Complete the `ThreatReport` Pydantic class by adding `remediation` and `affected_systems` lists.
+2. **TODO 2**: Implement `check_model_exists(model_name)` querying `/api/tags`.
+3. **TODO 3**: Implement `query_model()` with `format="json"` to enforce structured JSON output.
+4. **TODO 4**: Handle JSON parsing and Pydantic validation with `try/except` error recovery.
+5. **TODO 5**: Format the output report using Rich panels with color-coded severity badges.
 
-### Step 1 — Explore Existing Models
+Run your client script:
 
-```bash
-ollama list
-ollama show --modelfile qwen2.5:1.5b
-```
-
-Notice the default parameters and chat template used by the base model.
-
-### Step 2 — Create the secops-mentor Model
-
-```bash
-ollama create secops-mentor -f Modelfile
-ollama list   # confirm secops-mentor appears
-```
-
-### Step 3 — Test It Interactively
-
-```bash
-ollama run secops-mentor
-```
-
-Try this prompt:
-```
-Analyse: "SSH brute force detected: 847 failed login attempts from 10.0.0.5 in 60 seconds". Return JSON.
-```
-
-### Step 4 — Run the Exercise
-
-```bash
+```powershell
 python exercises/ex03_custom_modelfile_client.py
 ```
 
-The exercise script sends several pre-defined log lines to `secops-mentor`, validates responses with Pydantic, and prints a formatted threat report.
+**Success criteria**: The script validates two complex security threats, parses them into typed `ThreatReport` objects, and renders Rich visual panels with zero runtime validation exceptions.
 
-Complete the TODOs in the script to:
-1. Add the `format="json"` parameter to the API request
-2. Implement Pydantic validation with error handling
-3. Add a retry on `ValidationError` (up to 2 retries)
+<details>
+<summary>💡 Hints (click to expand)</summary>
 
----
+- If `secops-mentor` has not been created yet, run `ollama create secops-mentor -f Modelfile` first.
+- The script automatically falls back to `qwen2.5:1.5b` with an explicit system prompt if `secops-mentor` is not found.
+- Use `ThreatReport.model_dump()` to convert validated Pydantic objects back into clean Python dictionaries.
+- Compare with `solutions/sol03_custom_modelfile_client.py`.
+</details>
 
-<details><summary>💡 Hint 1 — How `ollama show --modelfile` works (Click to expand)</summary>
+### Bonus Challenge: Add Custom Tool Rules to Modelfile
 
-`ollama show --modelfile <model>` reconstructs the Modelfile that produced a model. This is useful for:
-
-1. **Inspecting community models** — understand what system prompt a Hugging Face or Ollama Hub model uses before trusting it
-2. **Debugging** — confirm your `ollama create` applied the parameters you intended
-3. **Forking** — copy the output, modify it, and `ollama create` a new variant
-
-```bash
-ollama show --modelfile llama3.2:1b
+Edit `Modelfile` and add a new instruction under `SYSTEM`:
+```dockerfile
+Always include an 'exploitability_score' between 0.0 and 10.0 in threat outputs.
 ```
+Re-run `ollama create secops-mentor -f Modelfile` and observe how the model output adapts immediately.
 
-You will see the full chat template (including the special tokens like `<|start_header_id|>`) that the model expects. This is why you should use the `/api/chat` endpoint (which handles templating automatically) rather than `/api/generate` with a hand-crafted template for chat models.
+---
 
-</details>
+<details>
+<summary>🔧 <strong>Common Mistakes & Troubleshooting</strong> (click to expand)</summary>
 
-<details><summary>💡 Hint 2 — Why temperature 0.2 is ideal for structured output (Click to expand)</summary>
+### Common Mistakes
 
-When generating JSON, the model must commit to an exact token sequence: `{`, `"`, `s`, `e`, `v`, etc. Deviation at any point can produce invalid JSON that crashes `json.loads()`.
+| Mistake | What Happens | Fix |
+|---|---|---|
+| Omitting `format="json"` in `/api/chat` requests | Model wraps JSON inside markdown fences (` ```json `), breaking strict parsers | Always pass `"format": "json"` in request payloads |
+| Using high temperatures (`> 0.8`) with structured schemas | Hallucinated schema keys or invalid JSON commas | Set `temperature: 0.2` in Modelfile for predictable JSON structures |
+| Forgetting to re-run `ollama create` after editing `Modelfile` | Changes do not take effect | Always re-run `ollama create <name> -f Modelfile` after edits |
 
-At `temperature=0.0` (greedy), the model always picks the highest-probability token. This sounds ideal, but it has a subtle failure mode: if the model assigns almost equal probability to two valid keys, greedy can flip between runs if internal floating-point order changes — not in practice on CPU, but it can get "stuck" producing the same wrong key repeatedly.
+### Troubleshooting
 
-At `temperature=0.2`, the distribution is still sharply peaked (the highest-probability token is chosen ~95%+ of the time), but the tiny stochasticity lets the model occasionally course-correct from an early poor choice. In practice, `0.1`–`0.2` maximises JSON schema compliance while remaining effectively deterministic for most use cases.
-
-</details>
-
-<details><summary>💡 Hint 3 — How Pydantic `model_validate` works (Click to expand)</summary>
-
-Pydantic v2 (required by `requirements.txt`) offers two JSON validation methods:
-
-```python
-from pydantic import BaseModel, ValidationError
-
-class MySchema(BaseModel):
-    name: str
-    score: float
-
-# Option A: validate from a JSON string directly
-try:
-    obj = MySchema.model_validate_json('{"name": "test", "score": 0.95}')
-except ValidationError as e:
-    print(e)   # structured error listing every field that failed
-
-# Option B: validate from a dict (after json.loads)
-import json
-raw = '{"name": "test", "score": "not_a_float"}'
-try:
-    obj = MySchema.model_validate(json.loads(raw))
-except ValidationError as e:
-    for error in e.errors():
-        print(f"Field: {error['loc']}, Issue: {error['msg']}")
-```
-
-**What Pydantic validates:**
-- Type coercion: `"0.95"` → `0.95` (string to float, automatic)
-- Missing required fields: raises `ValidationError` with field name
-- `Literal` constraints: `severity` must be one of the allowed values
-- Custom validators: add `@field_validator` for domain-specific rules
+- **"ValidationError: 1 validation error for ThreatReport"**: The model omitted a required field. Add explicit examples to your Modelfile `SYSTEM` prompt.
+- **"Failed to parse JSON"**: Strip any accidental leading or trailing markdown fences with `text.strip().removeprefix("```json").removesuffix("```")`.
 
 </details>
 
 ---
 
-## ✅ Verification
+# Summary
 
-- [ ] `ollama list` shows `secops-mentor` in the model list
-- [ ] `ollama run secops-mentor` produces JSON-structured threat analysis
-- [ ] `python exercises/ex03_custom_modelfile_client.py` runs and all Pydantic validations pass
-- [ ] You can explain the difference between `Q4_K_M` and `Q2_K` and when to use each
+## 🔑 Key Takeaways
 
----
-
-<details><summary>🔧 Common Lab Errors & Fixes</summary>
-
-**`Error: model 'secops-mentor' not found` when running exercise**
-> Run `ollama create secops-mentor -f Modelfile` from the repo root first. The Modelfile path is relative to where you run the command.
-
-**`json.JSONDecodeError` even with `format="json"`**
-> Some models occasionally prefix JSON with markdown fences (` ```json `). Strip them before parsing:
-> ```python
-> raw = resp.json()["response"].strip()
-> if raw.startswith("```"):
->     raw = raw.split("```")[1]
->     if raw.startswith("json"):
->         raw = raw[4:]
-> ```
-
-**`pydantic.ValidationError` on `severity` field**
-> The model returned a capitalised severity (e.g. `"High"` vs `"high"`). Add case normalisation:
-> ```python
-> from pydantic import field_validator
->
-> class ThreatAnalysis(BaseModel):
->     severity: str
->
->     @field_validator("severity")
->     @classmethod
->     def normalise_severity(cls, v):
->         return v.lower()
-> ```
-
-**`ollama create` fails with `Error: file not found`**
-> Ensure you are running the command from the repo root where `Modelfile` lives, or use the full path: `ollama create secops-mentor -f C:\path\to\Modelfile`
-
-</details>
+1. **Modelfiles package personas & knobs**: Bundle base weights, sampling parameters (`temperature 0.2`), and system instructions into versioned AI images.
+2. **`format="json"` enforces deterministic contracts**: Ollama guarantees syntactically valid JSON output when this flag is activated.
+3. **Pydantic brings type safety to AI**: Validating model outputs with Pydantic ensures downstream software never crashes on malformed responses.
 
 ---
 
-[⬅️ Previous Lab](lab-02-prompt-to-answer-pipeline.md) | [🏠 Home](../README.md) | [➡️ Next Lab](lab-04-react-agent-from-scratch.md)
+## ➡️ What's Next
+
+Now that your model can reliably output structured JSON contracts, you are ready to cross the boundary into **Agentic AI**!
+
+In **[Lab 04: ReAct Agent Loop From Scratch](lab-04-react-agent-from-scratch.md)**, you'll learn:
+
+- The ReAct (Reason + Act) loop architecture: `Thought -> Action -> Observation -> Final Answer`
+- How to connect local Python functions (system checks, log parsers, risk calculators) to the LLM
+- How to implement multi-turn tool calling with loop protections from scratch
+
+---
+
+**[⬅️ Back to Course Home](../README.md)** | **[Continue to Lab 04 ➡️](lab-04-react-agent-from-scratch.md)**

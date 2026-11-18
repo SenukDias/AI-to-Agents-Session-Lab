@@ -1,4 +1,18 @@
-theme: jekyll-theme-midnight
-title: "AI to Agents Session Lab"
-description: "From LLM Internals & Local Ollama Deployment to Autonomous Agentic Task Scheduling"
-author: "Senuk Manditha Dias"
+title: AI to Agents Session Lab
+description: From LLM Internals & Local Ollama Deployment to Autonomous Agentic Task Scheduling
+theme: jekyll-theme-cayman
+show_downloads: true
+github:
+  repository_url: https://github.com/SenukDias/AI-to-Agents-Session-Lab
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: true

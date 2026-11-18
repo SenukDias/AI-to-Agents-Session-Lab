@@ -1,299 +1,255 @@
-<p align="center">
-  <img src="../assets/bento/hero-banner.svg" alt="AI to Agents Session Lab" width="100%"/>
-</p>
-
-![Lab 00](https://img.shields.io/badge/Lab%2000-Setup%20%26%20CPU%20Tuning-FACC15?style=for-the-badge&labelColor=0E1013&logoColor=FACC15)
-![Time](https://img.shields.io/badge/Time-30%20min-white?style=for-the-badge&labelColor=0E1013)
-![Difficulty](https://img.shields.io/badge/Difficulty-Beginner-FACC15?style=for-the-badge&labelColor=0E1013)
-![CPU Only](https://img.shields.io/badge/CPU%20Only-No%20GPU%20Required-FACC15?style=for-the-badge&labelColor=0E1013)
-
-[🏠 Home](../README.md) | [➡️ Next Lab](lab-01-llm-theory-and-tokens.md)
-
+---
+layout: default
+title: "Lab 00: Setup, Architecture & CPU Tuning"
 ---
 
-# Lab 00: Environment Setup & CPU Tuning
+![Lab 00: Setup, Architecture & CPU Tuning](../assets/images/header-lab-00.svg)
+
+> **Install Ollama, understand how GGUF quantization wraps llama.cpp, tune CPU environment variables, and run pre-flight diagnostics on any standard laptop.**
+
+Welcome to the foundation lab! In this lab, you'll get Ollama installed and optimized on your local CPU machine, pull the lightweight `qwen2.5:1.5b` and `llama3.2:1b` models, and verify that your system is fully configured. No GPU or cloud subscription required. Once your environment is verified with `doctor.py`, the real demos begin in Lab 01!
+
+> ⚠️ **Prerequisites**: Ensure you have Python 3.9+ and Git installed. A laptop with at least 4 GB of RAM is sufficient for this entire course.
 
 ## 🎯 Learning Objectives
 
-By the end of this lab you will be able to:
+By the end of this lab, you'll be able to:
 
-- Install Ollama on Windows, macOS, or Linux
-- Understand how Ollama wraps `llama.cpp` and serves GGUF quantized models via REST
-- Configure CPU-only environment variables to prevent RAM swapping on laptops
-- Pull and verify two lightweight models (`qwen2.5:1.5b` and `llama3.2:1b`)
-- Run the repo pre-flight health check script
+- Install and run Ollama as a background service on Windows, macOS, or Linux
+- Understand how Ollama wraps `llama.cpp` and serves GGUF quantized models (`Q4_K_M`)
+- Configure CPU memory tuning parameters to eliminate disk swapping
+- Verify your environment using the automated pre-flight diagnostics suite (`scripts/doctor.py`)
 
----
-
-## 📚 Theory
-
-### What Is Ollama?
-
-Ollama is an open-source model server that bundles `llama.cpp` (a highly optimised C++ LLM inference engine) into a simple CLI + REST API. It downloads model weights in **GGUF** (GPT-Generated Unified Format) — a binary format that stores quantized weights and all metadata in a single file.
-
-![Ollama Architecture](../assets/diagrams/15-ollama-architecture-flow.png)
-
-**How it works end-to-end:**
-
-```
-Your Code  ──HTTP──▶  Ollama REST API (:11434)
-                             │
-                             ▼
-                     llama.cpp engine
-                             │
-                       GGUF file on disk
-                     (quantized weights)
-                             │
-                       CPU RAM (mmap)
-                             │
-                       Token output
-```
-
-1. Ollama exposes a REST API on `http://localhost:11434`
-2. When you call `/api/generate` or `/api/chat`, Ollama loads the GGUF file into RAM via memory-mapping (`mmap`)
-3. `llama.cpp` performs inference entirely on CPU using BLAS-accelerated matrix multiplication
-4. Generated tokens stream back as newline-delimited JSON
-
-### Why GGUF Quantization Matters for CPU
-
-Full-precision (FP32) weights for even a 1.5B parameter model would require ~6 GB RAM. **Quantization** compresses weights to 4-bit integers, shrinking memory footprint by ~4×:
-
-| Format   | Bits/weight | 1.5B model RAM | Quality impact |
-|----------|-------------|----------------|----------------|
-| F16      | 16          | ~3.0 GB        | None           |
-| Q8_0     | 8           | ~1.6 GB        | Negligible     |
-| Q4_K_M   | 4 (mixed)   | ~1.0 GB        | Very small     |
-| Q2_K     | 2           | ~0.6 GB        | Noticeable     |
-
-> [!TIP]
-> `Q4_K_M` is the sweet spot for CPU inference: it cuts RAM by ~75% versus F16 with minimal quality loss. The `K` means it uses a mixed-precision scheme (some layers kept higher precision), and `M` is the "medium" variant of that scheme.
+> ⏱️ **Estimated Time**: ~30 minutes (10 min reading + 20 min hands-on)
 
 ---
 
-## 🔬 Hands-On Steps
+# Real-World Analogy: The AI Engine Under the Hood
 
-### Step 1 — Install Ollama
+<p align="center">
+  <img src="../assets/diagrams/15-ollama-architecture-flow.png" alt="Ollama Architecture Flow" width="85%"/>
+</p>
 
-**Windows (winget)**
+Think of running an LLM like running a high-performance engine:
+
+- **The Raw Weights (FP16)** are like unrefined crude fuel — huge, bulky, and demanding specialized tanker trucks (enterprise GPUs with 80 GB VRAM).
+- **Quantization (GGUF Q4_K_M)** is the refinement process — compressing 16-bit floating-point numbers down to 4.5 bits without sacrificing structural integrity, allowing the engine to run on regular unleaded fuel (standard laptop CPU RAM).
+- **`llama.cpp`** is the finely tuned mechanical transmission, executing fast tensor matrix arithmetic directly on consumer CPU vector registers (AVX2 / AVX-512 / ARM NEON).
+- **Ollama** is the modern dashboard and ignition key — wrapping the low-level engine inside an intuitive CLI and high-speed REST API (`http://localhost:11434`).
+
+---
+
+## Installation
+
+> ⏱️ **Time estimate**: Installation takes 2–5 minutes. Downloading the session models adds another 2–4 minutes depending on your internet connection.
+
+### Windows Installation (Option A: WinGet / Option B: Installer)
+
+Open PowerShell and install Ollama:
+
 ```powershell
+# Option A: Install via WinGet
 winget install Ollama.Ollama
-```
-After installation, Ollama runs as a background Windows Service and starts automatically on boot.
 
-**macOS (Homebrew)**
+# Option B: Or download the standalone installer directly from
+# https://ollama.com/download/OllamaSetup.exe
+```
+
+### macOS & Linux Installation
+
 ```bash
+# macOS via Homebrew
 brew install ollama
-# Then start the service:
-brew services start ollama
-```
 
-**Linux (one-liner)**
-```bash
+# Linux via automated shell script
 curl -fsSL https://ollama.com/install.sh | sh
 ```
-On Linux the installer registers a `systemd` service: `sudo systemctl enable --now ollama`
 
 ---
 
-### Step 2 — CPU Memory Tuning
+## CPU Memory Tuning (Critical for Laptops)
 
-On machines with ≤ 8 GB RAM, the default Ollama settings allow multiple models to stay loaded simultaneously, which can cause the OS to swap to disk and slow inference to a crawl. Set these environment variables **permanently** before the next steps:
+By default, Ollama may attempt to keep multiple models resident in RAM or handle concurrent requests simultaneously, which can cause severe memory paging and disk swap storms on 4 GB–8 GB RAM laptops.
 
-**Windows — PowerShell (run once, persists across reboots)**
+Configure these three environment variables to lock Ollama into a lightweight, predictable footprint:
+
 ```powershell
-# Restrict to one model loaded at a time
-[System.Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL","1","User")
-[System.Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS","1","User")
+# Windows PowerShell (Set permanently for current user)
+[System.Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "1", "User")
+[System.Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "1", "User")
+[System.Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "5m", "User")
 
-# Unload model from RAM after 5 minutes of inactivity
-[System.Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE","5m","User")
-
-# Apply immediately in current session
-$env:OLLAMA_NUM_PARALLEL = "1"
-$env:OLLAMA_MAX_LOADED_MODELS = "1"
-$env:OLLAMA_KEEP_ALIVE = "5m"
+# Verify the variables are set
+Get-ChildItem Env:OLLAMA_*
 ```
 
-**macOS / Linux — `.bashrc` / `.zshrc`**
 ```bash
+# macOS / Linux (Add to ~/.bashrc or ~/.zshrc)
 export OLLAMA_NUM_PARALLEL=1
 export OLLAMA_MAX_LOADED_MODELS=1
 export OLLAMA_KEEP_ALIVE=5m
 ```
 
-| Variable | What it does |
-|---|---|
-| `OLLAMA_NUM_PARALLEL` | Max concurrent generation requests per loaded model |
-| `OLLAMA_MAX_LOADED_MODELS` | Max models resident in RAM simultaneously |
-| `OLLAMA_KEEP_ALIVE` | Idle TTL before Ollama evicts a model from RAM |
-
-> [!IMPORTANT]
-> After setting these variables on Windows, **restart the Ollama service** via Task Manager → Services → Ollama, or run:
-> ```powershell
-> Stop-Service -Name "Ollama" -ErrorAction SilentlyContinue; Start-Service -Name "Ollama"
-> ```
+| Variable | Recommended Value | Impact on Laptops |
+|---|:---:|---|
+| `OLLAMA_NUM_PARALLEL` | `1` | Processes one request at a time, avoiding CPU core thrashing |
+| `OLLAMA_MAX_LOADED_MODELS` | `1` | Ensures only one model occupies RAM at any moment |
+| `OLLAMA_KEEP_ALIVE` | `5m` | Automatically unloads idle models after 5 minutes to release RAM |
 
 ---
 
-### Step 3 — Pull Models
+## See It In Action
 
-Pull both models used throughout the labs. These are small enough to run on 4 GB RAM machines:
+### Demo 1: Pulling the Session Models
 
-```bash
-# Primary model — excellent instruction-following, 1.0 GB (Q4_K_M)
+We will pull our two core models: `qwen2.5:1.5b` (primary model for JSON & function calling) and `llama3.2:1b` (fast sub-second model for pipeline timing experiments):
+
+```powershell
+# Pull the session primary model (~986 MB download)
 ollama pull qwen2.5:1.5b
 
-# Fast model — ultra-light, great for benchmarking overhead
+# Pull the fast comparison model (~770 MB download)
 ollama pull llama3.2:1b
 ```
 
-Verify they are stored locally:
-```bash
-ollama list
+<details>
+<summary>🎬 See it in action!</summary>
+
+```text
+pulling manifest 
+pulling 00ba584c3d85... 100% ▕████████████████▏ 986 MB                         
+pulling 43070cd41713... 100% ▕████████████████▏  11 KB                         
+pulling 0725c88c7849... 100% ▕████████████████▏  244 B                         
+verifying sha256 digest 
+writing manifest 
+success
 ```
 
-Expected output:
-```
-NAME               ID            SIZE    MODIFIED
-qwen2.5:1.5b       ...           986 MB  just now
-llama3.2:1b        ...           1.3 GB  just now
-```
+*Your download speed will vary based on your connection.*
+</details>
+
+**The takeaway**: Both models combined require under 1.8 GB of total disk storage and run completely offline with zero telemetry.
 
 ---
 
-### Step 4 — Run the Pre-flight Check
+### Demo 2: Pre-Flight Environment Diagnostics (`scripts/doctor.py`)
 
-From the **repo root**, run the doctor script. It checks that Ollama is reachable, models are present, and Python dependencies are installed:
+Run the pre-flight diagnostics script to audit Python version, host RAM, CPU topology, port 11434 availability, and installed packages:
 
-```bash
+```powershell
 python scripts/doctor.py
 ```
 
-A passing run looks like:
+<details>
+<summary>🎬 See it in action!</summary>
+
+```text
+                                        Pre-flight Diagnostics                 
+┌────────────────────────────────┬─────────────────────────────────────────────
+│ Check                          │ Detail                                      
+├────────────────────────────────┼─────────────────────────────────────────────
+│ 1. Python Version              │ Python 3.10+ (Pass)                         
+│ 2. Available RAM               │ 4.2 GB free / 16.0 GB total                 
+│ 3. CPU Cores                   │ 4 physical cores, 8 logical threads         
+│ 4. Disk Space                  │ 15.2 GB free on current drive               
+│ 5. Ollama Service Running      │ HTTP 200 OK (http://localhost:11434)        
+│ 6. Port 11434 Accessible       │ Connected successfully                      
+│ 7. Model qwen2.5:1.5b          │ Present (986 MB)                            
+│ 8. Model llama3.2:1b           │ Present (770 MB)                            
+│ 9. Python Packages             │ OK: requests, rich, pydantic, schedule      
+│ 10. Ollama API Smoke Test      │ Generated 3 tokens in 0.42s                 
+└────────────────────────────────┴─────────────────────────────────────────────
+
+🚀 All checks passed! You're ready to start Lab 01.
 ```
-✅ Ollama reachable at http://localhost:11434
-✅ qwen2.5:1.5b — found
-✅ llama3.2:1b — found
-✅ Python packages: requests, rich, pydantic, schedule, python-dotenv
-🎉 All checks passed — you are ready for Lab 01!
-```
+</details>
+
+**The takeaway**: `doctor.py` gives you an instant, automated health report before writing a single line of application code.
 
 ---
 
-<details><summary>💡 Hint 1 — How to verify Ollama is running via curl (Click to expand)</summary>
+## 📝 Assignment
 
-Ollama exposes a simple health endpoint:
+### Main Challenge: Verify Zero-GPU Execution
 
-```bash
-curl http://localhost:11434/
-```
-Expected response: `Ollama is running`
+1. Start an interactive session with `qwen2.5:1.5b`:
+   ```powershell
+   ollama run qwen2.5:1.5b
+   ```
+2. Ask the model to describe what GGUF quantization is:
+   ```text
+   >>> Explain what GGUF Q4_K_M quantization means in 2 sentences.
+   ```
+3. Open a second terminal and inspect active models in RAM:
+   ```powershell
+   ollama ps
+   ```
+4. Observe the `SIZE` and `PROCESSOR` column. You should see `100% CPU`!
+5. Exit the session by typing `/bye`.
 
-To list available models via API:
-```bash
-curl http://localhost:11434/api/tags
-```
+**Success criteria**: `ollama ps` confirms the model is loaded in memory and executing 100% on CPU.
 
-If Ollama is not running on Windows:
-```powershell
-# Check service status
-Get-Service -Name "Ollama"
+<details>
+<summary>💡 Hints (click to expand)</summary>
 
-# Start it if stopped
-Start-Service -Name "Ollama"
-```
-
+- If `ollama ps` shows empty, the model may have already unloaded if idle for longer than `OLLAMA_KEEP_ALIVE`.
+- Run a quick prompt first, then immediately run `ollama ps` in your second terminal.
+- Use `ollama list` to inspect all locally stored model files.
 </details>
 
-<details><summary>💡 Hint 2 — What does GGUF Q4_K_M actually mean? (Click to expand)</summary>
+### Bonus Challenge: Test 4 GB RAM Fallback (`qwen2.5:0.5b`)
 
-Breaking down the naming:
-- **GGUF** — GPT-Generated Unified Format. A single binary file containing weights + tokenizer + metadata
-- **Q4** — 4-bit integer quantization (weights stored as 4-bit values, reducing precision but massively cutting size)
-- **K** — k-quants scheme: uses different quantization levels per tensor layer. Attention layers (most quality-sensitive) stay at higher precision; feed-forward layers are quantized more aggressively
-- **M** — "Medium" variant of k-quants (between _S small and _L large in quality/size tradeoff)
-
-Result: a model that behaves very close to its full-precision parent but fits in ~1 GB instead of ~3 GB.
-
-</details>
-
-<details><summary>💡 Hint 3 — How to free RAM by unloading models (Click to expand)</summary>
-
-Ollama keeps a model in RAM for `OLLAMA_KEEP_ALIVE` after the last request. To evict it immediately without restarting Ollama:
-
-```bash
-# Force unload by setting keep_alive to 0 in an API request
-curl http://localhost:11434/api/generate -d '{"model":"qwen2.5:1.5b","keep_alive":0}'
-```
-
-Or use the CLI to run with an immediate unload:
-```bash
-ollama run qwen2.5:1.5b --keepalive 0s
-```
-
-You can confirm the model is unloaded with:
-```bash
-ollama ps
-# Empty output = no models currently loaded in RAM
-```
-
-</details>
+If you are running on an older machine with only 4 GB total system RAM:
+1. Pull the ultra-lightweight fallback model: `ollama pull qwen2.5:0.5b` (only ~390 MB).
+2. Test inference speed: `ollama run qwen2.5:0.5b "Hello!"`.
+3. Notice how it loads in less than 500ms even on low-power Intel Celeron or Core i3 processors!
 
 ---
 
-## ✅ Verification
+<details>
+<summary>🔧 <strong>Common Mistakes & Troubleshooting</strong> (click to expand)</summary>
 
-Before moving on, confirm all of the following:
+### Common Mistakes
 
-- [ ] `ollama list` shows both `qwen2.5:1.5b` and `llama3.2:1b`
-- [ ] `curl http://localhost:11434/` returns `Ollama is running`
-- [ ] `python scripts/doctor.py` shows all green checkmarks
-- [ ] Environment variables are set (`echo $env:OLLAMA_NUM_PARALLEL` on Windows should print `1`)
+| Mistake | What Happens | Fix |
+|---|---|---|
+| Running `ollama` commands before starting the service | `connection refused` or `cannot reach localhost:11434` | Launch Ollama from Start Menu or run `ollama serve` in a background terminal |
+| Omitting quotes around PowerShell environment setters | Syntax error in PowerShell | Use `[System.Environment]::SetEnvironmentVariable("KEY","VAL","User")` |
+| Pulling full FP16 models (e.g. 70B) on a laptop | System freezes, disk thrashing, Out Of Memory | Always stick to `1.5b` or `1b` models for CPU training sessions |
 
----
+### Troubleshooting
 
-<details><summary>🔧 Common Lab Errors & Fixes</summary>
-
-**`ollama: command not found` after `winget install`**
-> The `winget` installer adds Ollama to `%LOCALAPPDATA%\Programs\Ollama`. Close and reopen PowerShell/Terminal so the updated `PATH` is loaded. If still missing, add manually:
-> ```powershell
-> $env:PATH += ";$env:LOCALAPPDATA\Programs\Ollama"
-> ```
-
-**`Error: listen tcp 127.0.0.1:11434: bind: address already in use`**
-> Something else is using port 11434. Find and stop it:
-> ```powershell
-> # Windows
-> netstat -ano | findstr :11434
-> # Note the PID in the last column, then:
-> Stop-Process -Id <PID> -Force
-> ```
-> ```bash
-> # macOS / Linux
-> lsof -ti:11434 | xargs kill -9
-> ```
-
-**`ollama pull` hangs or times out**
-> Check disk space first (`df -h` / `Get-PSDrive C`). Models need 1–2 GB free. If space is fine, it may be a network issue — retry with `ollama pull qwen2.5:1.5b` and wait; large files can take several minutes on slower connections.
-
-**Model runs extremely slowly (< 1 token/sec)**
-> RAM is likely being swapped to disk. Confirm env vars are set, restart the Ollama service, and try `qwen2.5:0.5b` as the smallest fallback:
-> ```bash
-> ollama pull qwen2.5:0.5b
-> ```
-
-**`python scripts/doctor.py` fails with `ModuleNotFoundError`**
-> Install dependencies first:
-> ```bash
-> pip install -r requirements.txt
-> ```
+- **Port 11434 already in use**: Another instance of Ollama is already running in the background. Check with `netstat -ano | findstr :11434`.
+- **Model pull interrupted**: Re-run `ollama pull qwen2.5:1.5b`; Ollama resumes downloads automatically from the last chunk.
+- **Firewall prompt**: Windows Defender may ask to allow Ollama network access. Allow private networks so `localhost:11434` is accessible.
 
 </details>
 
 ---
 
-📖 **Further Reading:** [Microsoft Learn — Fundamentals of Generative AI](https://learn.microsoft.com/en-us/training/modules/fundamentals-generative-ai/?wt.mc_id=studentamb_296178)
+# Summary
+
+## 🔑 Key Takeaways
+
+1. **Ollama bridges high performance and simplicity**: It compiles `llama.cpp` natively for your CPU architecture while exposing an intuitive REST API.
+2. **GGUF Q4_K_M is the CPU sweet spot**: Compresses 16-bit parameters to 4.5 bits, reducing RAM consumption by 75% with virtually zero loss in reasoning quality.
+3. **Environment tuning prevents swap storms**: Locking `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1` guarantees predictable, responsive performance on any standard laptop.
+
+> 📋 **Quick Reference**: See [CHEATSHEET.md](../CHEATSHEET.md) for a full table of Ollama CLI commands and endpoints.
 
 ---
 
-[🏠 Home](../README.md) | [➡️ Next Lab](lab-01-llm-theory-and-tokens.md)
+## ➡️ What's Next
+
+Now that your local CPU runtime is tuned and verified, let's explore what actually happens when text enters a neural network!
+
+In **[Lab 01: LLM Theory, Tokens & Embeddings](lab-01-llm-theory-and-tokens.md)**, you'll learn:
+
+- The evolutionary hierarchy from AI to Machine Learning, Deep Learning, GenAI, and Autonomous Agents
+- How BPE tokenizers turn strings into numerical indices
+- How vector embeddings project semantic concepts into geometric space
+- Hands-on token and embedding exploration using `exercises/ex01_token_explorer.py`
+
+---
+
+**[⬅️ Back to Course Home](../README.md)** | **[Continue to Lab 01 ➡️](lab-01-llm-theory-and-tokens.md)**
